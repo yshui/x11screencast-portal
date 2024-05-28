@@ -180,7 +180,11 @@ async fn client_task_inner(
     let Some(msg) = client.next().await else {
         return Ok(());
     };
-    let ClientMessage::CreateStream { cookie, rectangles, embed_cursor } = msg?;
+    let ClientMessage::CreateStream {
+        cookie,
+        rectangles,
+        embed_cursor,
+    } = msg?;
     tracing::info!("CreateStream: {:?}", cookie);
     if cookie != *our_cookie {
         return Err(anyhow::anyhow!("Invalid cookie {}", our_cookie));

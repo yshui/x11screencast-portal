@@ -16,7 +16,7 @@ use x11rb_async::{
     protocol::{randr::ConnectionExt, xproto::ConnectionExt as _},
 };
 use zbus::zvariant;
-use zvariant::{DeserializeDict, SerializeDict, Type};
+use zvariant::{DeserializeDict, OwnedValue, SerializeDict, Type, Value};
 
 struct Picom {
     conn: Async<UnixStream>,
@@ -210,6 +210,8 @@ struct Session {
     source_type: SourceType,
     allow_multiple: bool,
     cursor_mode: CursorMode,
+    persist: bool,
+    restore_data: Option<RestoreDataInner>,
 }
 
 #[zbus::interface(name = "org.freedesktop.impl.portal.Session")]
@@ -309,6 +311,18 @@ impl<'a, T: std::fmt::Debug> From<FdoError<'a, T>> for zbus::fdo::Error {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, OwnedValue)]
+struct RestoreDataInner {
+    data: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Type)]
+struct RestoreData {
+    vendor: String,
+    version: u32,
+    data: zvariant::OwnedValue,
+}
+
 #[derive(SerializeDict, Type)]
 #[zvariant(signature = "a{sv}")]
 struct StreamDict {
@@ -322,14 +336,17 @@ struct StreamDict {
 #[zvariant(signature = "a{sv}")]
 struct StartResponse {
     streams: Vec<(u32, StreamDict)>,
+    restore_data: Option<RestoreData>,
 }
 
-#[derive(DeserializeDict, Type)]
+#[derive(DeserializeDict, Type, Debug)]
 #[zvariant(signature = "a{sv}")]
 struct SelectSourcesOptions {
     multiple: Option<bool>,
     types: Option<SourceType>,
     cursor_mode: Option<CursorMode>,
+    persist_mode: Option<u32>,
+    restore_data: Option<RestoreData>,
 }
 
 #[zbus::interface(name = "org.freedesktop.impl.portal.ScreenCast")]
@@ -368,6 +385,8 @@ impl ScreenCast {
                     allow_multiple: false,
                     source_type: SourceType::Monitor,
                     cursor_mode: CursorMode::Hidden,
+                    persist: false,
+                    restore_data: None,
                 },
             )
             .await?;
@@ -386,6 +405,7 @@ impl ScreenCast {
         u32,
         std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
     )> {
+        tracing::info!("select_sources: {options:?}");
         let session = server.interface::<_, Session>(session_handle).await?;
         let mut session = session.get_mut().await;
         if let Some(source_type) = options.types {
@@ -402,6 +422,17 @@ impl ScreenCast {
         if let Some(cursor_mode) = options.cursor_mode {
             session.cursor_mode = cursor_mode;
         }
+        if let Some(persist_mode) = options.persist_mode {
+            session.persist = persist_mode != 0;
+        }
+        let restore_data: Option<RestoreDataInner> = options.restore_data.and_then(|d| {
+            if d.vendor == "picom" && d.version == 0 {
+                d.data.try_into().ok()
+            } else {
+                None
+            }
+        });
+        session.restore_data = restore_data;
         // TODO(yshui): handle `cursor_mode`
         Ok((0, Default::default()))
     }
@@ -438,6 +469,7 @@ impl ScreenCast {
         };
         let mut rectangles = SmallVec::<[_; 6]>::new();
         let mut types = SmallVec::<[_; 6]>::new();
+        let mut monitor_name = None;
         if source_type.contains(SourceType::Monitor) {
             let monitors = x11
                 .randr_get_monitors(root, true)
@@ -447,6 +479,18 @@ impl ScreenCast {
                 .await
                 .map_err(FdoError::with_msg("Failed to get monitors"))?;
             let monitor_count = monitors.monitors.len();
+            let monitor_names: FuturesOrdered<_> = monitors
+                .monitors
+                .iter()
+                .map(|m| async {
+                    Ok::<_, anyhow::Error>(x11.get_atom_name(m.name).await?.reply().await?)
+                })
+                .collect();
+            let monitor_names: SmallVec<[_; 8]> = monitor_names.collect().await;
+            let monitor_names: SmallVec<[_; 8]> = monitor_names
+                .into_iter()
+                .collect::<Result<_, _>>()
+                .map_err(FdoError::with_msg("get monitor names"))?;
             let mut m = monitors.monitors.iter().map(|m| protocol::Rectangle {
                 x: m.x as i32,
                 y: m.y as i32,
@@ -456,21 +500,36 @@ impl ScreenCast {
             if session.allow_multiple {
                 rectangles.extend(m)
             } else {
-                let old_default_monitor = self
-                    .default_monitor
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                let mut default_monitor = old_default_monitor;
-                if default_monitor >= monitor_count {
-                    default_monitor = 0;
+                let mut monitor_index = None;
+                if let Some(restore_data) = &session.restore_data {
+                    monitor_index = monitor_names
+                        .iter()
+                        .position(|n| n.name == restore_data.data);
+                    tracing::info!(
+                        "Monitor {} is {:?}",
+                        String::from_utf8_lossy(&restore_data.data),
+                        monitor_index
+                    );
                 }
-                tracing::info!("default_monitor: {}", default_monitor);
-                rectangles.extend(m.nth(default_monitor));
-                let _ = self.default_monitor.compare_exchange(
-                    old_default_monitor,
-                    default_monitor + 1,
-                    std::sync::atomic::Ordering::Relaxed,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                let monitor_index = monitor_index.unwrap_or_else(|| {
+                    let old_default_monitor = self
+                        .default_monitor
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let mut default_monitor = old_default_monitor;
+                    if default_monitor >= monitor_count {
+                        default_monitor = 0;
+                    }
+                    tracing::info!("default_monitor: {}", default_monitor);
+                    let _ = self.default_monitor.compare_exchange(
+                        old_default_monitor,
+                        default_monitor + 1,
+                        std::sync::atomic::Ordering::Relaxed,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    default_monitor
+                });
+                monitor_name = Some(monitor_names[monitor_index].clone());
+                rectangles.extend(m.nth(monitor_index));
             };
             types.extend(rectangles.iter().map(|_| SourceType::Monitor));
         }
@@ -530,7 +589,17 @@ impl ScreenCast {
             })
             .collect();
 
-        Ok((0, StartResponse { streams }))
+        Ok((
+            0,
+            StartResponse {
+                streams,
+                restore_data: monitor_name.map(|name| RestoreData {
+                    vendor: "picom".to_string(),
+                    version: 0,
+                    data: RestoreDataInner { data: name.name }.try_into().unwrap(),
+                }),
+            },
+        ))
     }
 }
 
