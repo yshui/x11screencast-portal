@@ -1,0 +1,29 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+xdg.workspace = true
+futures-util.workspace = true
+async-io.workspace = true
+serde_json.workspace = true
+protocol = { path = "../protocol" }
+zbus = "4.2.2"
+zvariant = "4.1.1"
+drm-fourcc.workspace = true
+x11rb.workspace = true
+oneshot = { version = "0.1.0", features = [ "async" ] }
+tracing = "0.1.40"
+tracing-subscriber.workspace = true
+argh = "0.1.12"
+smol = "2.0.0"
+serde.workspace = true
+smallvec.workspace = true
+bitflags = { version = "2.5.0", features = [ "serde" ] }
+x11rb-async = { version = "0.13.0", features = [ "randr" ] }
+
+[build-dependencies]
+anyhow.workspace = true
+pkg-config.workspace = true

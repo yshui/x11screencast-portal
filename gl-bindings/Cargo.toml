@@ -1,0 +1,11 @@
+[package]
+name = "gl-bindings"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[build-dependencies]
+pkg-config = "0.3.0"
+anyhow.workspace = true
+gl_generator = "0.14.0"
