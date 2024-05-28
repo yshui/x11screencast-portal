@@ -377,32 +377,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "argh",
- "async-io",
- "bitflags",
- "drm-fourcc",
- "futures-util",
- "oneshot",
- "pkg-config",
- "protocol",
- "serde",
- "serde_json",
- "smallvec",
- "smol",
- "tracing",
- "tracing-subscriber",
- "x11rb",
- "x11rb-async",
- "xdg",
- "zbus",
- "zvariant",
-]
-
-[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1270,6 +1244,32 @@ dependencies = [
  "rustix",
  "tracing",
  "windows-sys",
+]
+
+[[package]]
+name = "portal"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argh",
+ "async-io",
+ "bitflags",
+ "drm-fourcc",
+ "futures-util",
+ "oneshot",
+ "pkg-config",
+ "protocol",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "smol",
+ "tracing",
+ "tracing-subscriber",
+ "x11rb",
+ "x11rb-async",
+ "xdg",
+ "zbus",
+ "zvariant",
 ]
 
 [[package]]

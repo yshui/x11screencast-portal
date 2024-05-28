@@ -38,7 +38,6 @@ use smallvec::smallvec;
 
 use crate::{DrmRenderNode, MessagesFromPipewire, MessagesToPipewire};
 
-
 pub(crate) fn fourcc_to_spa_format(
     fourcc: drm_fourcc::DrmFourcc,
 ) -> Option<spa::param::video::VideoFormat> {
@@ -654,7 +653,9 @@ impl Pipewire {
         {
             return;
         }
-        let buffer = unsafe { stream.dequeue_raw_buffer().as_mut().unwrap() };
+        let Some(buffer) = (unsafe { stream.dequeue_raw_buffer().as_mut() }) else {
+            return;
+        };
         let id = unsafe { *(buffer.user_data as *const DefaultKey) };
         data.outstanding_buffer.set(Some(buffer));
         self.tx.send(Outgoing::ActivateBuffer { id }).unwrap();
