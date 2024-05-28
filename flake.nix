@@ -13,12 +13,10 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, fenix, ... } @ inputs:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        fenix' = pkgs.callPackage "${fenix}/." {};
-        rust-toolchain = fenix'.fromManifestFile inputs.rust-manifest;
-        rust = fenix'.combine (with rust-toolchain; [
+    let
+      g = pkgs: let
+        rust-toolchain = pkgs.fenix.fromManifestFile inputs.rust-manifest;
+        rust = pkgs.fenix.combine (with rust-toolchain; [
           rustc cargo rust-src rustfmt clippy
         ]);
         rustPlatform = (pkgs.makeRustPlatform {
@@ -41,8 +39,7 @@
         packages = with pkgs; [
           pkg-config
         ];
-      in
-      {
+      in {
         devShell = pkgs.mkShell {
           buildInputs = libraries;
           nativeBuildInputs = [ rust ] ++ packages;
@@ -97,5 +94,14 @@ EOF
               --replace "@outpath@" $out
           '';
         };
-      });
+      };
+    in
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = nixpkgs.legacyPackages.${system}.extend fenix.overlays.default;
+      in (g pkgs)) // {
+      overlays.default = final: prev: {
+        xdg-desktop-portal-picom = (g (final.extend fenix.overlays.default)).packages.default;
+      };
+    };
 }
