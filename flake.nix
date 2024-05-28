@@ -59,7 +59,7 @@
 
           postInstall = let
             dbus-service = pkgs.lib.generators.toINI {} {
-              "D-Bus Service" = {
+              "D-BUS Service" = {
                 Name = "org.freedesktop.impl.portal.desktop.picom";
                 Exec = "@outpath@/bin/xdg-desktop-portal-picom";
                 SystemdService = "xdg-desktop-portal-picom.service";

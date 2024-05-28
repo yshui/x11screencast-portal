@@ -1,4 +1,4 @@
-[D-Bus Service]
+[D-BUS Service]
 Exec=@outpath@
 Name=org.freedesktop.impl.portal.ScreenCast
 SystemdService=xdg-desktop-portal-picom.service

@@ -1,0 +1,10 @@
+[Service]
+BusName=org.freedesktop.impl.portal.desktop.picom
+ExecStart=@outpath@/bin/xdg-desktop-portal-picom
+Slice=session.slice
+Type=dbus
+
+[Unit]
+Description=xdg-desktop-portal ScreenCast based on picom
+PartOf=graphical-session.target
+
