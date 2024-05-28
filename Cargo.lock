@@ -1247,32 +1247,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "portal"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "argh",
- "async-io",
- "bitflags",
- "drm-fourcc",
- "futures-util",
- "oneshot",
- "pkg-config",
- "protocol",
- "serde",
- "serde_json",
- "smallvec",
- "smol",
- "tracing",
- "tracing-subscriber",
- "x11rb",
- "x11rb-async",
- "xdg",
- "zbus",
- "zvariant",
-]
-
-[[package]]
 name = "ppv-lite86"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2082,6 +2056,32 @@ name = "xdg"
 version = "2.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213b7324336b53d2414b2db8537e56544d981803139155afa84f76eeebb7a546"
+
+[[package]]
+name = "xdg-desktop-portal-picom"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argh",
+ "async-io",
+ "bitflags",
+ "drm-fourcc",
+ "futures-util",
+ "oneshot",
+ "pkg-config",
+ "protocol",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "smol",
+ "tracing",
+ "tracing-subscriber",
+ "x11rb",
+ "x11rb-async",
+ "xdg",
+ "zbus",
+ "zvariant",
+]
 
 [[package]]
 name = "xdg-home"

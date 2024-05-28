@@ -305,7 +305,7 @@ async fn run(
     while let Some(new_client) = incoming.next().await {
         match new_client {
             Ok(new_client) => {
-                println!("New client from {:?}", new_client);
+                tracing::info!("New client from {:?}", new_client.get_ref().peer_addr());
                 smol::spawn(client_task(our_cookie.clone(), new_client, pw_tx.clone())).detach();
             }
             Err(e) => tracing::error!("Error accepting new client: {:?}", e),

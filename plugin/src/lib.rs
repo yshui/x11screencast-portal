@@ -1192,6 +1192,7 @@ unsafe extern "C" fn backend_plugin_init(backend: *mut picom::backend_base, _: *
     }
 }
 
+#[cfg(not(test))]
 #[ctor]
 unsafe fn init() {
     tracing_subscriber::fmt::init();
