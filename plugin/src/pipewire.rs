@@ -615,6 +615,7 @@ impl Pipewire {
             )?
         };
         assert!(inner_buf.n_datas == dma_buf.plane_count()?);
+        let (tx, rx) = oneshot::channel();
         self.tx
             .send(Outgoing::AddBuffer {
                 dma_buf,
@@ -622,10 +623,11 @@ impl Pipewire {
                 x,
                 y,
                 embed_cursor,
+                reply: tx,
             })
             .unwrap();
-        let Incoming::BufferImported { id, dma_buf } = self.rx.recv().unwrap() else {
-            panic!("Unexpected message");
+        let Ok((id, dma_buf)) = rx.recv() else {
+            panic!("picom failed to add buffer");
         };
         buf.user_data = Box::leak(Box::new(id)) as *mut _ as *mut _;
         let datas =

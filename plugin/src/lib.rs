@@ -20,7 +20,6 @@ mod cursor;
 mod ffi;
 mod pipewire;
 mod server;
-use ctor::ctor;
 use drm_fourcc::DrmModifier;
 use gl_bindings::{
     egl,
@@ -325,13 +324,12 @@ impl PluginContext {
                     x,
                     y,
                     embed_cursor,
+                    reply,
                 } => {
                     let image = CaptureReceiver::import(&dma_buf, stream_id, x, y, embed_cursor)
                         .context("import")?;
                     let id = self.buffers.insert(image);
-                    pw_tx
-                        .send(MessagesToPipewire::BufferImported { id, dma_buf })
-                        .ok();
+                    reply.send((id, dma_buf)).ok();
                 }
                 MessagesFromPipewire::ActivateBuffer { id } => {
                     assert!(!active_buffers.contains(&id));
@@ -603,10 +601,6 @@ struct CaptureReceiver {
 
 #[derive(Debug)]
 enum MessagesToPipewire {
-    BufferImported {
-        id: DefaultKey,
-        dma_buf: gbm::BufferObject<()>,
-    },
     /// Sent when picom presents a new frame, after we have sent commands to copy this frame into our buffer.
     /// After sending this, buffer `id` will stop being active.
     NewFrame {
@@ -638,6 +632,7 @@ enum MessagesFromPipewire {
         x: i32,
         y: i32,
         embed_cursor: bool,
+        reply: oneshot::Sender<(DefaultKey, gbm::BufferObject<()>)>,
     },
     /// Set buffer active. There can be multiple active buffers at the same time.
     ActivateBuffer {
@@ -1186,14 +1181,16 @@ unsafe fn backend_plugin_init_inner(backend: &mut picom::backend_base) -> anyhow
     GL.with(|gl_| assert!(gl_.set(gl).is_ok()));
     Ok(())
 }
-unsafe extern "C" fn backend_plugin_init(backend: *mut picom::backend_base, _: *mut c_void) {
+
+/// # Safety
+pub unsafe extern "C" fn backend_plugin_init(backend: *mut picom::backend_base, _: *mut c_void) {
     if let Err(e) = backend_plugin_init_inner(&mut *backend) {
         tracing::debug!("backend_plugin_init failed: {e:?}");
     }
 }
 
 #[cfg(not(test))]
-#[ctor]
+#[ctor::ctor]
 unsafe fn init() {
     tracing_subscriber::fmt::init();
     tracing::debug!("init called");
