@@ -469,7 +469,7 @@ impl ScreenCast {
         };
         let mut rectangles = SmallVec::<[_; 6]>::new();
         let mut types = SmallVec::<[_; 6]>::new();
-        let mut monitor_name = None;
+        let mut output_monitor_names = SmallVec::<[_; 8]>::new();
         if source_type.contains(SourceType::Monitor) {
             let monitors = x11
                 .randr_get_monitors(root, true)
@@ -498,6 +498,7 @@ impl ScreenCast {
                 height: m.height as u32,
             });
             if session.allow_multiple {
+                output_monitor_names = monitor_names;
                 rectangles.extend(m)
             } else {
                 let mut monitor_index = None;
@@ -528,7 +529,7 @@ impl ScreenCast {
                     );
                     default_monitor
                 });
-                monitor_name = Some(monitor_names[monitor_index].clone());
+                output_monitor_names.push(monitor_names[monitor_index].clone());
                 rectangles.extend(m.nth(monitor_index));
             };
             types.extend(rectangles.iter().map(|_| SourceType::Monitor));
@@ -576,19 +577,25 @@ impl ScreenCast {
             .into_iter()
             .zip(types)
             .zip(rectangles)
-            .map(|((node_id, type_), rectangle)| {
+            .zip(output_monitor_names.iter())
+            .map(|(((node_id, type_), rectangle), name)| {
                 (
                     node_id,
                     StreamDict {
                         position: (rectangle.x, rectangle.y),
                         size: (rectangle.width as i32, rectangle.height as i32),
                         source_type: type_,
-                        mapping_id: None,
+                        mapping_id: Some(String::from_utf8_lossy(&name.name).into_owned()),
                     },
                 )
             })
             .collect();
 
+        let monitor_name = if output_monitor_names.len() == 1 {
+            Some(output_monitor_names[0].clone())
+        } else {
+            None
+        };
         Ok((
             0,
             StartResponse {
