@@ -126,10 +126,11 @@ impl Stream for Client {
         cx: &mut std::task::Context,
     ) -> std::task::Poll<Option<Self::Item>> {
         let this = self.project();
-        if this.rx.is_closed() {
-            return std::task::Poll::Ready(None);
+        match this.rx.try_recv() {
+            Err(async_channel::TryRecvError::Empty) => this.rx.poll_next(cx),
+            Ok(msg) => std::task::Poll::Ready(Some(msg)),
+            Err(async_channel::TryRecvError::Closed) => std::task::Poll::Ready(None),
         }
-        this.rx.poll_next(cx)
     }
 }
 
