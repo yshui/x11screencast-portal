@@ -1,5 +1,3 @@
-use std::os::unix::fs::symlink;
-
 #[derive(Debug)]
 struct ParseCallbacks;
 
@@ -10,13 +8,8 @@ impl bindgen::callbacks::ParseCallbacks for ParseCallbacks {
         original_variant_name: &str,
         _variant_value: bindgen::callbacks::EnumVariantValue,
     ) -> Option<String> {
-        let enum_name = enum_name?
-            .trim_start_matches("enum ")
-            .trim_end_matches("_t");
-        if original_variant_name
-            .to_ascii_lowercase()
-            .starts_with(enum_name)
-        {
+        let enum_name = enum_name?.trim_start_matches("enum ").trim_end_matches("_t");
+        if original_variant_name.to_ascii_lowercase().starts_with(enum_name) {
             Some(original_variant_name[enum_name.len() + 1..].to_string())
         } else {
             None
@@ -33,26 +26,13 @@ fn main() -> anyhow::Result<()> {
     let out_dir = std::env::var("OUT_DIR")?;
     let out_dir = std::path::Path::new(&out_dir);
 
-    println!(
-        "cargo:rustc-link-search=native={}",
-        egl.link_paths[0].display()
-    );
+    println!("cargo:rustc-link-search=native={}", egl.link_paths[0].display());
 
     let bindings = bindgen::Builder::default()
         .header("picom.h")
         .clang_arg(format!("-I{}", manifest_dir.display()))
-        .clang_args(
-            pixman
-                .include_paths
-                .iter()
-                .map(|p| format!("-I{}", p.display())),
-        )
-        .clang_args(
-            libxcb
-                .include_paths
-                .iter()
-                .map(|p| format!("-I{}", p.display())),
-        )
+        .clang_args(pixman.include_paths.iter().map(|p| format!("-I{}", p.display())))
+        .clang_args(libxcb.include_paths.iter().map(|p| format!("-I{}", p.display())))
         .allowlist_function("picom_api_get_interfaces")
         .allowlist_function("backend_register")
         .opaque_type("image_handle")

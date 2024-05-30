@@ -22,20 +22,18 @@ fn status_to_result(status: raw::ffi_status) -> Result<(), libffi::low::Error> {
 struct ClosureData1<A, U, R> {
     callback: fn(&mut A, *mut U) -> R,
     userdata: U,
-    cif: libffi::low::ffi_cif,
-    atypes: [*mut libffi::low::ffi_type; 1],
+    cif:      libffi::low::ffi_cif,
+    atypes:   [*mut libffi::low::ffi_type; 1],
 }
 
 pub struct Closure1<A, U, R> {
     closure: *mut ffi_closure,
-    fnptr: CodePtr,
-    data: *mut ClosureData1<A, U, R>,
+    fnptr:   CodePtr,
+    data:    *mut ClosureData1<A, U, R>,
 }
 
 impl<A, U, R> Closure1<A, U, R> {
-    pub fn code_ptr(&self) -> *mut c_void {
-        self.fnptr.0
-    }
+    pub fn code_ptr(&self) -> *mut c_void { self.fnptr.0 }
 }
 
 impl<A, U, R> Drop for Closure1<A, U, R> {
@@ -54,19 +52,23 @@ unsafe extern "C" fn closure1_trampoline<A, U, R: CType>(
     userdata_: *mut c_void,
 ) {
     let args = args as *mut *mut A;
-    // Calling `callback` can free `userdata_`, so we can't keep mut reference to it.
+    // Calling `callback` can free `userdata_`, so we can't keep mut reference to
+    // it.
     let callback = (*(userdata_ as *mut ClosureData1<A, U, R>)).callback;
     let userdata = &mut (*(userdata_ as *mut ClosureData1<A, U, R>)).userdata as *mut U;
     let ret = &mut *(ret_ as *mut R::RetType);
     *ret = (callback)(&mut **args, userdata).into();
 }
 
-/// Create a new FFI closure that calls `callback` with `userdata` as the second argument.
+/// Create a new FFI closure that calls `callback` with `userdata` as the second
+/// argument.
 ///
 /// # Safety
 ///
-/// - The returned function pointer must not be called after `closure` is dropped.
-/// - userdata must have been initialized before the returned function pointer is called the first time.
+/// - The returned function pointer must not be called after `closure` is
+///   dropped.
+/// - userdata must have been initialized before the returned function pointer
+///   is called the first time.
 pub unsafe fn make_ffi_closure1<U, A: CType, R: CType>(
     callback: fn(&mut A, *mut U) -> R,
     userdata: U,
@@ -98,30 +100,24 @@ where
         fnptr.0,
     ))
     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    Ok(Closure1 {
-        closure,
-        fnptr,
-        data,
-    })
+    Ok(Closure1 { closure, fnptr, data })
 }
 
 pub struct Closure2<A, B, U, R> {
     closure: *mut ffi_closure,
-    fnptr: CodePtr,
-    data: *mut ClosureData2<A, B, U, R>,
+    fnptr:   CodePtr,
+    data:    *mut ClosureData2<A, B, U, R>,
 }
 
 impl<A, B, U, R> Closure2<A, B, U, R> {
-    pub fn code_ptr(&self) -> *mut c_void {
-        self.fnptr.0
-    }
+    pub fn code_ptr(&self) -> *mut c_void { self.fnptr.0 }
 }
 
 struct ClosureData2<A, B, U, R> {
     callback: fn(&mut A, &mut B, *mut U) -> R,
     userdata: U,
-    cif: libffi::low::ffi_cif,
-    atypes: [*mut libffi::low::ffi_type; 2],
+    cif:      libffi::low::ffi_cif,
+    atypes:   [*mut libffi::low::ffi_type; 2],
 }
 
 impl<A, B, U, R> Drop for Closure2<A, B, U, R> {
@@ -141,7 +137,8 @@ unsafe extern "C" fn closure2_trampoline<A, B, U, R: CType>(
 ) {
     let [arg1, arg2] = *(args as *const [*mut c_void; 2]);
     let ret = ret_ as *mut R::RetType;
-    // Calling `callback` can free `userdata_`, so we can't keep mut reference to it.
+    // Calling `callback` can free `userdata_`, so we can't keep mut reference to
+    // it.
     let callback = (*(userdata_ as *mut ClosureData2<A, B, U, R>)).callback;
     let userdata = &mut (*(userdata_ as *mut ClosureData2<A, B, U, R>)).userdata as *mut U;
     *ret = (callback)(&mut *(arg1 as *mut A), &mut *(arg2 as *mut B), userdata).into();
@@ -159,10 +156,7 @@ where
         callback,
         userdata,
         cif: Default::default(),
-        atypes: [
-            A::reify().into_middle().as_raw_ptr(),
-            B::reify().into_middle().as_raw_ptr(),
-        ],
+        atypes: [A::reify().into_middle().as_raw_ptr(), B::reify().into_middle().as_raw_ptr()],
     }));
     let rtype = <R::RetType as CType>::reify().into_middle().as_raw_ptr();
     libffi::low::prep_cif(
@@ -181,9 +175,5 @@ where
         fnptr.0,
     ))
     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    Ok(Closure2 {
-        closure,
-        fnptr,
-        data,
-    })
+    Ok(Closure2 { closure, fnptr, data })
 }

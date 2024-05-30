@@ -1,7 +1,3 @@
-use anyhow::Context as _;
-use cursor::Cursor;
-use slotmap::{DefaultKey, SlotMap};
-use smallvec::SmallVec;
 use std::{
     cell::{OnceCell, UnsafeCell},
     collections::HashSet,
@@ -15,6 +11,11 @@ use std::{
         Arc,
     },
 };
+
+use anyhow::Context as _;
+use cursor::Cursor;
+use slotmap::{DefaultKey, SlotMap};
+use smallvec::SmallVec;
 
 mod cursor;
 mod ffi;
@@ -44,31 +45,28 @@ extern "C" {
 }
 
 struct SavedFnPtrs {
-    deinit: unsafe extern "C" fn(*mut picom::backend_base),
-    present: Option<unsafe extern "C" fn(*mut picom::backend_base) -> bool>,
+    deinit:      unsafe extern "C" fn(*mut picom::backend_base),
+    present:     Option<unsafe extern "C" fn(*mut picom::backend_base) -> bool>,
     root_change: Option<unsafe extern "C" fn(*mut picom::backend_base, *mut picom::session)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, bytemuck::NoUninit)]
 #[repr(C)]
 struct Extent {
-    width: u32,
+    width:  u32,
     height: u32,
 }
 
 impl From<x11rb::protocol::xproto::GetGeometryReply> for Extent {
     fn from(r: x11rb::protocol::xproto::GetGeometryReply) -> Self {
-        Self {
-            width: r.width as _,
-            height: r.height as _,
-        }
+        Self { width: r.width as _, height: r.height as _ }
     }
 }
 
 #[derive(Clone)]
 struct PipewireSender {
     waker: ::pipewire::channel::Sender<()>,
-    tx: Sender<MessagesToPipewire>,
+    tx:    Sender<MessagesToPipewire>,
 }
 
 struct PipewireSendGuard<'a>(&'a PipewireSender, bool);
@@ -86,15 +84,13 @@ impl<'a> PipewireSendGuard<'a> {
         self.1 = true;
         self.0.tx.send(msg).map_err(|_| anyhow::anyhow!("send"))
     }
-    fn wake(&mut self) {
-        self.1 = true;
-    }
+
+    fn wake(&mut self) { self.1 = true; }
 }
 
 impl PipewireSender {
-    fn start_send(&self) -> PipewireSendGuard<'_> {
-        PipewireSendGuard(self, false)
-    }
+    fn start_send(&self) -> PipewireSendGuard<'_> { PipewireSendGuard(self, false) }
+
     fn new(waker: ::pipewire::channel::Sender<()>, tx: Sender<MessagesToPipewire>) -> Self {
         Self { waker, tx }
     }
@@ -134,31 +130,31 @@ struct PluginContext {
 
     // We use UnsafeCell here because only one callback can be called at any given time,
     // so we can safely get mutable reference to the context from the `Rc``.
-    deinit: Option<ffi::Closure1<*mut picom::backend_base, Rc<UnsafeCell<Self>>, ()>>,
-    present: Option<ffi::Closure1<*mut picom::backend_base, Rc<UnsafeCell<Self>>, u8>>,
+    deinit:      Option<ffi::Closure1<*mut picom::backend_base, Rc<UnsafeCell<Self>>, ()>>,
+    present:     Option<ffi::Closure1<*mut picom::backend_base, Rc<UnsafeCell<Self>>, u8>>,
     root_change: Option<
         ffi::Closure2<*mut picom::backend_base, *mut picom::session, Rc<UnsafeCell<Self>>, ()>,
     >,
 
     cursor_shader: GLuint,
 
-    pw_rx: Receiver<MessagesFromPipewire>,
-    pw_tx: Option<PipewireSender>,
+    pw_rx:         Receiver<MessagesFromPipewire>,
+    pw_tx:         Option<PipewireSender>,
     saved_fn_ptrs: SavedFnPtrs,
-    buffers: SlotMap<DefaultKey, CaptureReceiver>,
+    buffers:       SlotMap<DefaultKey, CaptureReceiver>,
 
     cookie: Arc<String>,
 }
 
 #[derive(Default)]
 struct GlStateGuard {
-    texture_2d: GLint,
-    draw_fbo: GLint,
-    read_fbo: GLint,
-    program: GLint,
-    blend_enabled: GLboolean,
-    blend_dst_rgb: GLint,
-    blend_src_rgb: GLint,
+    texture_2d:      GLint,
+    draw_fbo:        GLint,
+    read_fbo:        GLint,
+    program:         GLint,
+    blend_enabled:   GLboolean,
+    blend_dst_rgb:   GLint,
+    blend_src_rgb:   GLint,
     blend_dst_alpha: GLint,
     blend_src_alpha: GLint,
 }
@@ -219,6 +215,7 @@ impl PluginContext {
             (self.saved_fn_ptrs.deinit)(backend)
         };
     }
+
     fn blit_cursor_prepare(
         shader: GLuint,
         x: i32,
@@ -296,17 +293,9 @@ impl PluginContext {
             }
         })
     }
+
     fn copy_back_buffer(&mut self) -> anyhow::Result<()> {
-        let Self {
-            pw_tx,
-            x11,
-            root,
-            cursor_monitor,
-            pw_rx,
-            root_size,
-            cursor_shader,
-            ..
-        } = self;
+        let Self { pw_tx, x11, root, cursor_monitor, pw_rx, root_size, cursor_shader, .. } = self;
         let Some(pw_send) = pw_tx.as_ref() else {
             return Ok(());
         };
@@ -391,18 +380,20 @@ impl PluginContext {
                         gl.DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, std::ptr::null());
                     }
                     match self.buffers[i].insert_fence() {
-                        Ok(fence) => pw_tx
-                            .send(MessagesToPipewire::NewFrame {
-                                id: i,
-                                fence,
-                                stream_id: self.buffers[i].stream_id,
-                            })
-                            .unwrap(),
+                        Ok(fence) => {
+                            pw_tx
+                                .send(MessagesToPipewire::NewFrame {
+                                    id: i,
+                                    fence,
+                                    stream_id: self.buffers[i].stream_id,
+                                })
+                                .unwrap()
+                        }
                         Err(e) => {
                             tracing::error!("insert_fence failed: {}", e);
                             pw_tx
                                 .send(MessagesToPipewire::BufferError {
-                                    id: i,
+                                    id:        i,
                                     stream_id: self.buffers[i].stream_id,
                                 })
                                 .unwrap()
@@ -425,6 +416,7 @@ impl PluginContext {
         });
         Ok(())
     }
+
     fn present(&mut self, backend: *mut picom::backend_base) -> bool {
         match self.copy_back_buffer() {
             Ok(()) => (),
@@ -440,6 +432,7 @@ impl PluginContext {
         }
         true
     }
+
     fn root_change(
         &mut self,
         backend: *mut picom::backend_base,
@@ -458,14 +451,12 @@ fn deinit_trampoline(
     backend: &mut *mut picom::backend_base,
     userdata: *mut Rc<UnsafeCell<PluginContext>>,
 ) {
-    tracing::debug!(
-        "userdata refcount: {}",
-        Rc::strong_count(unsafe { &*userdata })
-    );
+    tracing::debug!("userdata refcount: {}", Rc::strong_count(unsafe { &*userdata }));
     let deinit = {
-        // This is extremely unsafe. Dropping `userdata.deinit` transitively drops `userdata`, which
-        // we still have a mut reference to (!). So we must keep it alive, until we have gotten rid of
-        // the mut reference to `userdata`.
+        // This is extremely unsafe. Dropping `userdata.deinit` transitively drops
+        // `userdata`, which we still have a mut reference to (!). So we must
+        // keep it alive, until we have gotten rid of the mut reference to
+        // `userdata`.
         let userdata = unsafe { &mut *(*userdata).get() };
         userdata.deinit(*backend);
         userdata.present.take();
@@ -473,8 +464,8 @@ fn deinit_trampoline(
         userdata.deinit.take()
     };
 
-    // Here we don't have mut reference to `userdata` anymore, only a raw ptr. So it's safe to drop
-    // `deinit`.
+    // Here we don't have mut reference to `userdata` anymore, only a raw ptr. So
+    // it's safe to drop `deinit`.
     drop(deinit);
 }
 
@@ -553,10 +544,7 @@ unsafe fn egl_check_extensions(egl: &egl::sys::Egl, dpy: egl::EGLDisplay) -> any
             .collect();
     for required in REQUIRED_EGL_CLIENT_EXTENSIONS {
         if !egl_extensions.contains(required) {
-            return Err(anyhow::anyhow!(
-                "Required EGL client extension {} not found",
-                required
-            ));
+            return Err(anyhow::anyhow!("Required EGL client extension {} not found", required));
         }
     }
     let egl_extensions: HashSet<&str> =
@@ -566,10 +554,7 @@ unsafe fn egl_check_extensions(egl: &egl::sys::Egl, dpy: egl::EGLDisplay) -> any
             .collect();
     for required in REQUIRED_EGL_EXTENSIONS {
         if !egl_extensions.contains(required) {
-            return Err(anyhow::anyhow!(
-                "Required EGL extension {} not found",
-                required
-            ));
+            return Err(anyhow::anyhow!("Required EGL extension {} not found", required));
         }
     }
     Ok(())
@@ -577,11 +562,10 @@ unsafe fn egl_check_extensions(egl: &egl::sys::Egl, dpy: egl::EGLDisplay) -> any
 
 struct DrmRenderNode(std::fs::File);
 impl AsFd for DrmRenderNode {
-    fn as_fd(&self) -> std::os::unix::io::BorrowedFd {
-        self.0.as_fd()
-    }
+    fn as_fd(&self) -> std::os::unix::io::BorrowedFd { self.0.as_fd() }
 }
-impl drm::Device for DrmRenderNode {}
+impl drm::Device for DrmRenderNode {
+}
 
 struct CaptureReceiver {
     texture: GLuint,
@@ -596,23 +580,24 @@ struct CaptureReceiver {
 }
 
 // We have 3 threads:
-// 1. picom thread, that's the compositor's main thread, which calls into hooks registered by our plugin.
-// 3. pipewire thread. This is the thread that runs the pipewire mainloop and handles pipewire communication.
+// 1. picom thread, that's the compositor's main thread, which calls into hooks
+//    registered by our plugin.
+// 3. pipewire thread. This is the thread that runs the pipewire mainloop and
+//    handles pipewire communication.
 
 #[derive(Debug)]
 enum MessagesToPipewire {
-    /// Sent when picom presents a new frame, after we have sent commands to copy this frame into our buffer.
-    /// After sending this, buffer `id` will stop being active.
+    /// Sent when picom presents a new frame, after we have sent commands to
+    /// copy this frame into our buffer. After sending this, buffer `id`
+    /// will stop being active.
     NewFrame {
-        id: DefaultKey,
-        fence: drm::control::syncobj::Handle,
+        id:        DefaultKey,
+        fence:     drm::control::syncobj::Handle,
         stream_id: DefaultKey,
     },
-    /// Error occurred for the given buffer. The pipewire thread should drop this buffer, and the stream it's associated with.
-    BufferError {
-        id: DefaultKey,
-        stream_id: DefaultKey,
-    },
+    /// Error occurred for the given buffer. The pipewire thread should drop
+    /// this buffer, and the stream it's associated with.
+    BufferError { id: DefaultKey, stream_id: DefaultKey },
     CreateStream {
         x: i32,
         y: i32,
@@ -634,11 +619,13 @@ enum MessagesFromPipewire {
         embed_cursor: bool,
         reply: oneshot::Sender<(DefaultKey, gbm::BufferObject<()>)>,
     },
-    /// Set buffer active. There can be multiple active buffers at the same time.
+    /// Set buffer active. There can be multiple active buffers at the same
+    /// time.
     ActivateBuffer {
         id: DefaultKey,
     },
-    /// Clear all imported buffers, this happens when the pipewire thread is shutting down.
+    /// Clear all imported buffers, this happens when the pipewire thread is
+    /// shutting down.
     RemoveBuffers {
         ids: SmallVec<[DefaultKey; 2]>,
     },
@@ -670,39 +657,39 @@ impl Drop for CaptureReceiver {
 }
 
 struct EglDmaBufParamterIds {
-    fd_ext: egl::EGLenum,
-    offset_ext: egl::EGLenum,
-    pitch_ext: egl::EGLenum,
+    fd_ext:          egl::EGLenum,
+    offset_ext:      egl::EGLenum,
+    pitch_ext:       egl::EGLenum,
     modifier_lo_ext: egl::EGLenum,
     modifier_hi_ext: egl::EGLenum,
 }
 
 const EGL_DMA_BUF_PARAMETER_IDS: [EglDmaBufParamterIds; 4] = [
     EglDmaBufParamterIds {
-        fd_ext: egl::sys::DMA_BUF_PLANE0_FD_EXT,
-        offset_ext: egl::sys::DMA_BUF_PLANE0_OFFSET_EXT,
-        pitch_ext: egl::sys::DMA_BUF_PLANE0_PITCH_EXT,
+        fd_ext:          egl::sys::DMA_BUF_PLANE0_FD_EXT,
+        offset_ext:      egl::sys::DMA_BUF_PLANE0_OFFSET_EXT,
+        pitch_ext:       egl::sys::DMA_BUF_PLANE0_PITCH_EXT,
         modifier_lo_ext: egl::sys::DMA_BUF_PLANE0_MODIFIER_LO_EXT,
         modifier_hi_ext: egl::sys::DMA_BUF_PLANE0_MODIFIER_HI_EXT,
     },
     EglDmaBufParamterIds {
-        fd_ext: egl::sys::DMA_BUF_PLANE1_FD_EXT,
-        offset_ext: egl::sys::DMA_BUF_PLANE1_OFFSET_EXT,
-        pitch_ext: egl::sys::DMA_BUF_PLANE1_PITCH_EXT,
+        fd_ext:          egl::sys::DMA_BUF_PLANE1_FD_EXT,
+        offset_ext:      egl::sys::DMA_BUF_PLANE1_OFFSET_EXT,
+        pitch_ext:       egl::sys::DMA_BUF_PLANE1_PITCH_EXT,
         modifier_lo_ext: egl::sys::DMA_BUF_PLANE1_MODIFIER_LO_EXT,
         modifier_hi_ext: egl::sys::DMA_BUF_PLANE1_MODIFIER_HI_EXT,
     },
     EglDmaBufParamterIds {
-        fd_ext: egl::sys::DMA_BUF_PLANE2_FD_EXT,
-        offset_ext: egl::sys::DMA_BUF_PLANE2_OFFSET_EXT,
-        pitch_ext: egl::sys::DMA_BUF_PLANE2_PITCH_EXT,
+        fd_ext:          egl::sys::DMA_BUF_PLANE2_FD_EXT,
+        offset_ext:      egl::sys::DMA_BUF_PLANE2_OFFSET_EXT,
+        pitch_ext:       egl::sys::DMA_BUF_PLANE2_PITCH_EXT,
         modifier_lo_ext: egl::sys::DMA_BUF_PLANE2_MODIFIER_LO_EXT,
         modifier_hi_ext: egl::sys::DMA_BUF_PLANE2_MODIFIER_HI_EXT,
     },
     EglDmaBufParamterIds {
-        fd_ext: egl::sys::DMA_BUF_PLANE3_FD_EXT,
-        offset_ext: egl::sys::DMA_BUF_PLANE3_OFFSET_EXT,
-        pitch_ext: egl::sys::DMA_BUF_PLANE3_PITCH_EXT,
+        fd_ext:          egl::sys::DMA_BUF_PLANE3_FD_EXT,
+        offset_ext:      egl::sys::DMA_BUF_PLANE3_OFFSET_EXT,
+        pitch_ext:       egl::sys::DMA_BUF_PLANE3_PITCH_EXT,
         modifier_lo_ext: egl::sys::DMA_BUF_PLANE3_MODIFIER_LO_EXT,
         modifier_hi_ext: egl::sys::DMA_BUF_PLANE3_MODIFIER_HI_EXT,
     },
@@ -734,6 +721,7 @@ impl CaptureReceiver {
             }
         })
     }
+
     fn import(
         dma_buf: &gbm::BufferObject<()>,
         stream_id: DefaultKey,
@@ -826,17 +814,7 @@ impl CaptureReceiver {
             }
             Ok((fbo, texture))
         })?;
-        Ok(Self {
-            fbo,
-            texture,
-            image,
-            stream_id,
-            width,
-            height,
-            x,
-            y,
-            embed_cursor,
-        })
+        Ok(Self { fbo, texture, image, stream_id, width, height, x, y, embed_cursor })
     }
 }
 
@@ -897,9 +875,9 @@ fn extra_modifier_check(modifier: u64, width: u16, height: u16) -> bool {
 
 #[repr(C)]
 struct PicomXConnection {
-    xcb: *mut c_void,
+    xcb:     *mut c_void,
     display: *mut c_void,
-    screen: libc::c_int,
+    screen:  libc::c_int,
 }
 const BASE64_CHARSET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 unsafe fn compile_shader(gl: &gl::Gl, source: &str, t: GLuint) -> anyhow::Result<GLuint> {
@@ -918,10 +896,7 @@ unsafe fn compile_shader(gl: &gl::Gl, source: &str, t: GLuint) -> anyhow::Result
         gl.GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
         let mut buf = vec![0; len as usize];
         gl.GetShaderInfoLog(shader, len, std::ptr::null_mut(), buf.as_mut_ptr() as _);
-        tracing::error!(
-            "Shader compilation failed: {}",
-            std::str::from_utf8(&buf).unwrap()
-        );
+        tracing::error!("Shader compilation failed: {}", std::str::from_utf8(&buf).unwrap());
         gl.DeleteShader(shader);
         return Err(anyhow::anyhow!("Shader compilation failed"));
     }
@@ -960,16 +935,11 @@ unsafe fn backend_plugin_init_inner(backend: &mut picom::backend_base) -> anyhow
     .collect();
     for required in REQUIRED_EGL_DEVICE_EXTENSIONS {
         if !egl_extensions.contains(required) {
-            return Err(anyhow::anyhow!(
-                "Required EGL device extension {} not found",
-                required
-            ));
+            return Err(anyhow::anyhow!("Required EGL device extension {} not found", required));
         }
     }
-    let render_node = egl.QueryDeviceStringEXT(
-        device as u64 as _,
-        egl::sys::DRM_RENDER_NODE_FILE_EXT as i32,
-    );
+    let render_node =
+        egl.QueryDeviceStringEXT(device as u64 as _, egl::sys::DRM_RENDER_NODE_FILE_EXT as i32);
     if render_node.is_null() {
         return Err(anyhow::anyhow!("QueryDeviceStringEXT failed"));
     }
@@ -992,19 +962,12 @@ unsafe fn backend_plugin_init_inner(backend: &mut picom::backend_base) -> anyhow
 
     let c = unsafe { &mut *(backend.c as *mut PicomXConnection) };
     let x11 = x11rb::xcb_ffi::XCBConnection::from_raw_xcb_connection(c.xcb, false)?;
-    let root = x11
-        .setup()
-        .roots
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("No root found"))?;
+    let root = x11.setup().roots.first().ok_or_else(|| anyhow::anyhow!("No root found"))?;
     let r = x11.get_geometry(root.root)?.reply()?;
     tracing::info!("Root size: {}x{}", r.width, r.height);
 
     let compositor_selection = format!("_NET_WM_CM_S{}", c.screen);
-    let atom = x11
-        .intern_atom(false, compositor_selection.as_bytes())?
-        .reply()?
-        .atom;
+    let atom = x11.intern_atom(false, compositor_selection.as_bytes())?.reply()?.atom;
     let selection_owner = x11.get_selection_owner(atom)?.reply()?.owner;
 
     tracing::info!("Selection owner: {selection_owner:#x}");
@@ -1074,10 +1037,7 @@ unsafe fn backend_plugin_init_inner(backend: &mut picom::backend_base) -> anyhow
         gl.GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len);
         let mut buf = vec![0; len as usize];
         gl.GetProgramInfoLog(program, len, std::ptr::null_mut(), buf.as_mut_ptr() as _);
-        tracing::error!(
-            "Program link failed: {}",
-            std::str::from_utf8(&buf).unwrap()
-        );
+        tracing::error!("Program link failed: {}", std::str::from_utf8(&buf).unwrap());
         gl.DeleteProgram(program);
         return Err(anyhow::anyhow!("Program link failed"));
     }
@@ -1101,8 +1061,8 @@ unsafe fn backend_plugin_init_inner(backend: &mut picom::backend_base) -> anyhow
         cursor_monitor,
         cursor_shader: program,
         saved_fn_ptrs: SavedFnPtrs {
-            deinit: backend.ops.deinit.unwrap_unchecked(),
-            present: backend.ops.present,
+            deinit:      backend.ops.deinit.unwrap_unchecked(),
+            present:     backend.ops.present,
             root_change: backend.ops.root_change,
         },
         root: root.root,
@@ -1139,24 +1099,14 @@ unsafe fn backend_plugin_init_inner(backend: &mut picom::backend_base) -> anyhow
         >(
             context_mut
                 .root_change
-                .insert(ffi::make_ffi_closure2(
-                    root_change_trampoline,
-                    context.clone(),
-                )?)
+                .insert(ffi::make_ffi_closure2(root_change_trampoline, context.clone())?)
                 .code_ptr(),
         ));
 
-        let egl_screencast_atom = context_mut
-            .x11
-            .intern_atom(false, b"EGL_SCREENCAST_COOKIE")?
-            .reply()?
-            .atom;
+        let egl_screencast_atom =
+            context_mut.x11.intern_atom(false, b"EGL_SCREENCAST_COOKIE")?.reply()?.atom;
 
-        let utf_string_atom = context_mut
-            .x11
-            .intern_atom(false, b"UTF8_STRING")?
-            .reply()?
-            .atom;
+        let utf_string_atom = context_mut.x11.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
 
         context_mut
             .x11

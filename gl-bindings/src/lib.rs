@@ -48,9 +48,9 @@ pub mod egl {
         pub const DRM_RENDER_NODE_FILE_EXT: super::EGLenum = 0x3377;
     }
 
-    pub use self::sys::types::{EGLContext, EGLDisplay};
-
     use std::os::raw;
+
+    pub use self::sys::types::{EGLContext, EGLDisplay};
 
     pub type khronos_utime_nanoseconds_t = khronos_uint64_t;
     pub type khronos_uint64_t = u64;

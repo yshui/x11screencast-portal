@@ -11,9 +11,9 @@ use x11rb::{connection::Connection as _, protocol::xfixes::ConnectionExt as _};
 pub(crate) struct Cursor {
     pub(crate) hotspot_x: u32,
     pub(crate) hotspot_y: u32,
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-    pub(crate) texture: gl::types::GLuint,
+    pub(crate) width:     u32,
+    pub(crate) height:    u32,
+    pub(crate) texture:   gl::types::GLuint,
 }
 
 #[derive(Debug)]
@@ -24,15 +24,15 @@ pub(crate) enum CursorMessage {
 
 struct CursorMonitorImpl {
     egl: egl::sys::Egl,
-    gl: gl::Gl,
+    gl:  gl::Gl,
 
-    textures: Vec<gl::types::GLuint>,
+    textures:       Vec<gl::types::GLuint>,
     cursor_serials: HashSet<u32>,
 
-    x11: x11rb::rust_connection::RustConnection,
-    egl_ctx: egl::sys::types::EGLContext,
+    x11:         x11rb::rust_connection::RustConnection,
+    egl_ctx:     egl::sys::types::EGLContext,
     egl_display: egl::sys::types::EGLDisplay,
-    tx: std::sync::mpsc::Sender<CursorMessage>,
+    tx:          std::sync::mpsc::Sender<CursorMessage>,
 }
 impl CursorMonitorImpl {
     fn run_inner(&mut self, screen: usize) -> anyhow::Result<()> {
@@ -54,9 +54,7 @@ impl CursorMonitorImpl {
                     if self.cursor_serials.contains(&notify.cursor_serial) {
                         if self
                             .tx
-                            .send(CursorMessage::ChangeCursor {
-                                serial: notify.cursor_serial,
-                            })
+                            .send(CursorMessage::ChangeCursor { serial: notify.cursor_serial })
                             .is_err()
                         {
                             break;
@@ -131,6 +129,7 @@ impl CursorMonitorImpl {
         }
         Ok(())
     }
+
     fn run(mut self, screen: usize) {
         if let Err(e) = self.run_inner(screen) {
             tracing::error!("Error in cursor monitor: {:?}", e);
@@ -151,7 +150,8 @@ impl CursorMonitorImpl {
         };
     }
 }
-unsafe impl Send for CursorMonitorImpl {}
+unsafe impl Send for CursorMonitorImpl {
+}
 
 pub(crate) struct CursorMonitor {
     rx: std::sync::mpsc::Receiver<CursorMessage>,
@@ -169,6 +169,7 @@ impl CursorMonitor {
             }
         })?)
     }
+
     pub(crate) fn current_cursor(&mut self) -> anyhow::Result<Option<&Cursor>> {
         while let Some(msg) = self.next()? {
             tracing::debug!("Cursor message: {:?}", msg);
@@ -184,6 +185,7 @@ impl CursorMonitor {
         }
         Ok(self.current_cursor.and_then(|c| self.cursors.get(&c)))
     }
+
     pub(crate) fn new(
         ctx: egl::sys::types::EGLContext,
         dpy: egl::sys::types::EGLDisplay,
@@ -231,10 +233,6 @@ impl CursorMonitor {
             tracing::warn!("Cursor monitor thread exited");
         });
 
-        Ok(Self {
-            rx,
-            cursors: HashMap::new(),
-            current_cursor: None,
-        })
+        Ok(Self { rx, cursors: HashMap::new(), current_cursor: None })
     }
 }

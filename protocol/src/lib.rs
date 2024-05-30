@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rectangle {
-    pub x: i32,
-    pub y: i32,
-    pub width: u32,
+    pub x:      i32,
+    pub y:      i32,
+    pub width:  u32,
     pub height: u32,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,8 +17,8 @@ pub enum ClientMessage {
     // client is connected to the same X server as us.
     /// Create a new stream.
     CreateStream {
-        cookie: String,
-        rectangles: SmallVec<[Rectangle; 6]>,
+        cookie:       String,
+        rectangles:   SmallVec<[Rectangle; 6]>,
         embed_cursor: bool,
     },
 }

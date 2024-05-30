@@ -1,3 +1,10 @@
+use std::{
+    os::unix::{ffi::OsStrExt, net::UnixStream},
+    pin::Pin,
+    sync::atomic::AtomicUsize,
+    task::ready,
+};
+
 use anyhow::Context;
 use async_io::Async;
 use futures_util::{
@@ -5,12 +12,6 @@ use futures_util::{
 };
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::{
-    os::unix::{ffi::OsStrExt, net::UnixStream},
-    pin::Pin,
-    sync::atomic::AtomicUsize,
-    task::ready,
-};
 use x11rb_async::{
     connection::Connection,
     protocol::{randr::ConnectionExt, xproto::ConnectionExt as _},
@@ -19,10 +20,10 @@ use zbus::zvariant;
 use zvariant::{DeserializeDict, OwnedValue, SerializeDict, Type, Value};
 
 struct Picom {
-    conn: Async<UnixStream>,
-    buf: Vec<u8>,
-    len: Option<u32>,
-    pos: usize,
+    conn:   Async<UnixStream>,
+    buf:    Vec<u8>,
+    len:    Option<u32>,
+    pos:    usize,
     cookie: String,
 
     out_buf: Vec<u8>,
@@ -37,12 +38,14 @@ impl std::fmt::Debug for Picom {
 
 impl Sink<protocol::ClientMessage> for Picom {
     type Error = anyhow::Error;
+
     fn poll_close(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
         Pin::new(&mut self.conn).poll_close(cx).map_err(Into::into)
     }
+
     fn poll_flush(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -50,17 +53,13 @@ impl Sink<protocol::ClientMessage> for Picom {
         ready!(self.as_mut().poll_ready(cx)?);
         Pin::new(&mut self.conn).poll_flush(cx).map_err(Into::into)
     }
+
     fn poll_ready(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
         while self.out_pos < self.out_buf.len() {
-            let Self {
-                conn,
-                out_buf,
-                out_pos,
-                ..
-            } = &mut *self;
+            let Self { conn, out_buf, out_pos, .. } = &mut *self;
             let written = ready!(Pin::new(&mut *conn).poll_write(cx, &out_buf[*out_pos..]))?;
             tracing::info!("written: {}", written);
             self.out_pos += written;
@@ -69,6 +68,7 @@ impl Sink<protocol::ClientMessage> for Picom {
         self.out_pos = 0;
         std::task::Poll::Ready(Ok(()))
     }
+
     fn start_send(
         mut self: Pin<&mut Self>,
         item: protocol::ClientMessage,
@@ -85,6 +85,7 @@ impl Sink<protocol::ClientMessage> for Picom {
 
 impl Stream for Picom {
     type Item = anyhow::Result<protocol::ServerMessage>;
+
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -143,12 +144,8 @@ impl Picom {
         .collect();
         let [compositor_selection, egl_screencast_cookie_atom, egl_screencast_socket_atom, utf8_string_atom] =
             <[_; 4]>::try_from(futs.collect::<Vec<_>>().await).unwrap();
-        let selection_owner = x11
-            .get_selection_owner(compositor_selection?)
-            .await?
-            .reply()
-            .await?
-            .owner;
+        let selection_owner =
+            x11.get_selection_owner(compositor_selection?).await?.reply().await?.owner;
         tracing::info!("selection_owner: {selection_owner:#x}");
         let utf8_string_atom = utf8_string_atom?;
         let (cookie, path) = if selection_owner != x11rb::NONE {
@@ -206,22 +203,22 @@ impl Picom {
 
 #[derive(Debug)]
 struct Session {
-    path: zbus::zvariant::ObjectPath<'static>,
-    source_type: SourceType,
+    path:           zbus::zvariant::ObjectPath<'static>,
+    source_type:    SourceType,
     allow_multiple: bool,
-    cursor_mode: CursorMode,
-    persist: bool,
-    restore_data: Option<RestoreDataInner>,
+    cursor_mode:    CursorMode,
+    persist:        bool,
+    restore_data:   Option<RestoreDataInner>,
 }
 
 #[zbus::interface(name = "org.freedesktop.impl.portal.Session")]
 impl Session {
     #[zbus(property, name = "version")]
-    fn version(&self) -> u32 {
-        1
-    }
+    fn version(&self) -> u32 { 1 }
+
     #[zbus(signal)]
     async fn closed(signal_ctx: zbus::SignalContext<'_>) -> zbus::Result<()>;
+
     async fn close(
         &self,
         #[zbus(object_server)] server: &zbus::ObjectServer,
@@ -235,7 +232,7 @@ impl Session {
 
 #[derive(Debug)]
 struct ScreenCast {
-    sessions: std::collections::HashMap<String, Session>,
+    sessions:        std::collections::HashMap<String, Session>,
     /// The monitor to pick when the requester doesn't support allow_multiple.
     default_monitor: AtomicUsize,
 }
@@ -258,12 +255,11 @@ impl<'a, T: zvariant::Type + Into<zvariant::Value<'a>>> FromIterator<T> for Arra
     }
 }
 impl<'a> From<ArrayExtend<'a>> for zvariant::Value<'a> {
-    fn from(value: ArrayExtend<'a>) -> Self {
-        zvariant::Value::Array(value.0)
-    }
+    fn from(value: ArrayExtend<'a>) -> Self { zvariant::Value::Array(value.0) }
 }
 impl<'a> TryFrom<ArrayExtend<'a>> for zvariant::OwnedValue {
     type Error = zvariant::Error;
+
     fn try_from(value: ArrayExtend<'a>) -> Result<Self, Self::Error> {
         zvariant::Value::Array(value.0).try_into()
     }
@@ -288,22 +284,16 @@ bitflags::bitflags! {
     }
 }
 impl Type for SourceType {
-    fn signature() -> zvariant::Signature<'static> {
-        u32::signature()
-    }
+    fn signature() -> zvariant::Signature<'static> { u32::signature() }
 }
 
 impl Type for CursorMode {
-    fn signature() -> zvariant::Signature<'static> {
-        u32::signature()
-    }
+    fn signature() -> zvariant::Signature<'static> { u32::signature() }
 }
 
 struct FdoError<'a, T>(&'a str, T);
 impl<'a, T> FdoError<'a, T> {
-    fn with_msg(msg: &'a str) -> impl FnOnce(T) -> Self {
-        move |e| Self(msg, e)
-    }
+    fn with_msg(msg: &'a str) -> impl FnOnce(T) -> Self { move |e| Self(msg, e) }
 }
 impl<'a, T: std::fmt::Debug> From<FdoError<'a, T>> for zbus::fdo::Error {
     fn from(FdoError(msg, e): FdoError<T>) -> Self {
@@ -318,33 +308,33 @@ struct RestoreDataInner {
 
 #[derive(Serialize, Deserialize, Debug, Type)]
 struct RestoreData {
-    vendor: String,
+    vendor:  String,
     version: u32,
-    data: zvariant::OwnedValue,
+    data:    zvariant::OwnedValue,
 }
 
 #[derive(SerializeDict, Type)]
 #[zvariant(signature = "a{sv}")]
 struct StreamDict {
-    position: (i32, i32),
-    size: (i32, i32),
+    position:    (i32, i32),
+    size:        (i32, i32),
     source_type: SourceType,
-    mapping_id: Option<String>,
+    mapping_id:  Option<String>,
 }
 
 #[derive(SerializeDict, Type)]
 #[zvariant(signature = "a{sv}")]
 struct StartResponse {
-    streams: Vec<(u32, StreamDict)>,
+    streams:      Vec<(u32, StreamDict)>,
     restore_data: Option<RestoreData>,
 }
 
 #[derive(DeserializeDict, Type, Debug)]
 #[zvariant(signature = "a{sv}")]
 struct SelectSourcesOptions {
-    multiple: Option<bool>,
-    types: Option<SourceType>,
-    cursor_mode: Option<CursorMode>,
+    multiple:     Option<bool>,
+    types:        Option<SourceType>,
+    cursor_mode:  Option<CursorMode>,
     persist_mode: Option<u32>,
     restore_data: Option<RestoreData>,
 }
@@ -352,18 +342,15 @@ struct SelectSourcesOptions {
 #[zbus::interface(name = "org.freedesktop.impl.portal.ScreenCast")]
 impl ScreenCast {
     const AVAILABLE_SOURCE_TYPE: SourceType = SourceType::Monitor.union(SourceType::Virtual);
+
     #[zbus(property, name = "version")]
-    fn version(&self) -> u32 {
-        5
-    }
+    fn version(&self) -> u32 { 5 }
+
     #[zbus(property)]
-    fn available_cursor_modes(&self) -> u32 {
-        (CursorMode::Embedded | CursorMode::Hidden).bits()
-    }
+    fn available_cursor_modes(&self) -> u32 { (CursorMode::Embedded | CursorMode::Hidden).bits() }
+
     #[zbus(property)]
-    fn available_source_types(&self) -> u32 {
-        Self::AVAILABLE_SOURCE_TYPE.bits()
-    }
+    fn available_source_types(&self) -> u32 { Self::AVAILABLE_SOURCE_TYPE.bits() }
 
     #[zbus(out_args("response", "results"))]
     async fn create_session(
@@ -373,22 +360,17 @@ impl ScreenCast {
         session_handle: zbus::zvariant::ObjectPath<'_>,
         _app_id: &str,
         _options: std::collections::HashMap<&str, zbus::zvariant::Value<'_>>,
-    ) -> zbus::fdo::Result<(
-        u32,
-        std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
-    )> {
+    ) -> zbus::fdo::Result<(u32, std::collections::HashMap<String, zbus::zvariant::OwnedValue>)>
+    {
         server
-            .at(
-                &session_handle,
-                Session {
-                    path: session_handle.to_owned(),
-                    allow_multiple: false,
-                    source_type: SourceType::Monitor,
-                    cursor_mode: CursorMode::Hidden,
-                    persist: false,
-                    restore_data: None,
-                },
-            )
+            .at(&session_handle, Session {
+                path:           session_handle.to_owned(),
+                allow_multiple: false,
+                source_type:    SourceType::Monitor,
+                cursor_mode:    CursorMode::Hidden,
+                persist:        false,
+                restore_data:   None,
+            })
             .await?;
         Ok((0, Default::default()))
     }
@@ -401,19 +383,15 @@ impl ScreenCast {
         session_handle: zbus::zvariant::ObjectPath<'_>,
         _app_id: &str,
         options: SelectSourcesOptions,
-    ) -> zbus::fdo::Result<(
-        u32,
-        std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
-    )> {
+    ) -> zbus::fdo::Result<(u32, std::collections::HashMap<String, zbus::zvariant::OwnedValue>)>
+    {
         tracing::info!("select_sources: {options:?}");
         let session = server.interface::<_, Session>(session_handle).await?;
         let mut session = session.get_mut().await;
         if let Some(source_type) = options.types {
             session.source_type = source_type & Self::AVAILABLE_SOURCE_TYPE;
             if session.source_type.is_empty() {
-                return Err(zbus::fdo::Error::InvalidArgs(
-                    "Invalid source type".to_string(),
-                ));
+                return Err(zbus::fdo::Error::InvalidArgs("Invalid source type".to_string()));
             }
         }
         if let Some(allow_multiple) = options.multiple {
@@ -452,18 +430,13 @@ impl ScreenCast {
             .await
             .map_err(FdoError::with_msg("Failed to connect to X11"))?;
         let _task = smol::spawn(fut);
-        let mut picom = Picom::new(&x11, screen)
-            .await
-            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        let mut picom =
+            Picom::new(&x11, screen).await.map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         let root = x11.setup().roots[screen].root;
         let cookie = picom.cookie.clone();
         let session = session.get_mut().await;
         let source_type = if !session.allow_multiple {
-            session
-                .source_type
-                .iter()
-                .next()
-                .unwrap_or(SourceType::Monitor)
+            session.source_type.iter().next().unwrap_or(SourceType::Monitor)
         } else {
             session.source_type
         };
@@ -482,8 +455,10 @@ impl ScreenCast {
             let monitor_names: FuturesOrdered<_> = monitors
                 .monitors
                 .iter()
-                .map(|m| async {
-                    Ok::<_, anyhow::Error>(x11.get_atom_name(m.name).await?.reply().await?)
+                .map(|m| {
+                    async {
+                        Ok::<_, anyhow::Error>(x11.get_atom_name(m.name).await?.reply().await?)
+                    }
                 })
                 .collect();
             let monitor_names: SmallVec<[_; 8]> = monitor_names.collect().await;
@@ -491,11 +466,13 @@ impl ScreenCast {
                 .into_iter()
                 .collect::<Result<_, _>>()
                 .map_err(FdoError::with_msg("get monitor names"))?;
-            let mut m = monitors.monitors.iter().map(|m| protocol::Rectangle {
-                x: m.x as i32,
-                y: m.y as i32,
-                width: m.width as u32,
-                height: m.height as u32,
+            let mut m = monitors.monitors.iter().map(|m| {
+                protocol::Rectangle {
+                    x:      m.x as i32,
+                    y:      m.y as i32,
+                    width:  m.width as u32,
+                    height: m.height as u32,
+                }
             });
             if session.allow_multiple {
                 output_monitor_names = monitor_names;
@@ -503,9 +480,7 @@ impl ScreenCast {
             } else {
                 let mut monitor_index = None;
                 if let Some(restore_data) = &session.restore_data {
-                    monitor_index = monitor_names
-                        .iter()
-                        .position(|n| n.name == restore_data.data);
+                    monitor_index = monitor_names.iter().position(|n| n.name == restore_data.data);
                     tracing::info!(
                         "Monitor {} is {:?}",
                         String::from_utf8_lossy(&restore_data.data),
@@ -513,9 +488,8 @@ impl ScreenCast {
                     );
                 }
                 let monitor_index = monitor_index.unwrap_or_else(|| {
-                    let old_default_monitor = self
-                        .default_monitor
-                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let old_default_monitor =
+                        self.default_monitor.load(std::sync::atomic::Ordering::Relaxed);
                     let mut default_monitor = old_default_monitor;
                     if default_monitor >= monitor_count {
                         default_monitor = 0;
@@ -546,9 +520,9 @@ impl ScreenCast {
                 .await
                 .map_err(FdoError::with_msg("root geometry"))?;
             rectangles.push(protocol::Rectangle {
-                x: 0,
-                y: 0,
-                width: geom.width as _,
+                x:      0,
+                y:      0,
+                width:  geom.width as _,
                 height: geom.height as _,
             });
             types.push(SourceType::Virtual);
@@ -579,15 +553,12 @@ impl ScreenCast {
             .zip(rectangles)
             .zip(output_monitor_names.iter())
             .map(|(((node_id, type_), rectangle), name)| {
-                (
-                    node_id,
-                    StreamDict {
-                        position: (rectangle.x, rectangle.y),
-                        size: (rectangle.width as i32, rectangle.height as i32),
-                        source_type: type_,
-                        mapping_id: Some(String::from_utf8_lossy(&name.name).into_owned()),
-                    },
-                )
+                (node_id, StreamDict {
+                    position:    (rectangle.x, rectangle.y),
+                    size:        (rectangle.width as i32, rectangle.height as i32),
+                    source_type: type_,
+                    mapping_id:  Some(String::from_utf8_lossy(&name.name).into_owned()),
+                })
             })
             .collect();
 
@@ -596,26 +567,23 @@ impl ScreenCast {
         } else {
             None
         };
-        Ok((
-            0,
-            StartResponse {
-                streams,
-                restore_data: monitor_name.map(|name| RestoreData {
-                    vendor: "picom".to_string(),
+        Ok((0, StartResponse {
+            streams,
+            restore_data: monitor_name.map(|name| {
+                RestoreData {
+                    vendor:  "picom".to_string(),
                     version: 0,
-                    data: RestoreDataInner { data: name.name }.try_into().unwrap(),
-                }),
-            },
-        ))
+                    data:    RestoreDataInner { data: name.name }.try_into().unwrap(),
+                }
+            }),
+        }))
     }
 }
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-    let screen_cast = ScreenCast {
-        sessions: Default::default(),
-        default_monitor: AtomicUsize::new(0),
-    };
+    let screen_cast =
+        ScreenCast { sessions: Default::default(), default_monitor: AtomicUsize::new(0) };
     let zbus = zbus::connection::Builder::session()?
         .name("org.freedesktop.impl.portal.desktop.picom")?
         .serve_at("/org/freedesktop/portal/desktop", screen_cast)?;

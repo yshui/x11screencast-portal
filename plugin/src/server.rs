@@ -1,3 +1,11 @@
+use std::{
+    io::{Read as _, Write as _},
+    os::unix::net::{UnixListener, UnixStream},
+    path::{Path, PathBuf},
+    pin::pin,
+    sync::Arc,
+};
+
 use async_channel::{Receiver, Sender};
 use fs4::FileExt as _;
 use futures_util::{
@@ -7,13 +15,6 @@ use futures_util::{
 };
 use smallvec::SmallVec;
 use smol::Async;
-use std::{
-    io::{Read as _, Write as _},
-    os::unix::net::{UnixListener, UnixStream},
-    path::{Path, PathBuf},
-    pin::pin,
-    sync::Arc,
-};
 use x11rb::protocol::xproto::{ConnectionExt as _, PropMode};
 
 fn place_runtime_file(name: &str) -> PathBuf {
@@ -67,6 +68,7 @@ impl Client {
             tx.send(Ok(msg)).await?;
         }
     }
+
     async fn read_side(
         stream: ReadHalf<Async<UnixStream>>,
         tx: Sender<anyhow::Result<ClientMessage>>,
@@ -80,6 +82,7 @@ impl Client {
         }
         tracing::info!("Client read side exited");
     }
+
     async fn write_side(
         mut stream: WriteHalf<Async<UnixStream>>,
         rx: Receiver<ServerMessage>,
@@ -96,6 +99,7 @@ impl Client {
             stream.write_all(msg).await?;
         }
     }
+
     fn new(stream: Async<UnixStream>) -> Self {
         let (tx1, rx1) = async_channel::unbounded();
         let (tx2, rx2) = async_channel::unbounded();
@@ -110,16 +114,13 @@ impl Client {
         })
         .detach();
 
-        Self {
-            tx: tx1,
-            rx: rx2,
-            read_task,
-        }
+        Self { tx: tx1, rx: rx2, read_task }
     }
 }
 
 impl Stream for Client {
     type Item = anyhow::Result<ClientMessage>;
+
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context,
@@ -134,6 +135,7 @@ impl Stream for Client {
 
 impl Sink<ServerMessage> for Client {
     type Error = anyhow::Error;
+
     fn poll_ready(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context,
@@ -143,6 +145,7 @@ impl Sink<ServerMessage> for Client {
         }
         std::task::Poll::Ready(Ok(()))
     }
+
     fn start_send(self: std::pin::Pin<&mut Self>, item: ServerMessage) -> Result<(), Self::Error> {
         let this = self.project();
         match this.tx.try_send(item) {
@@ -151,6 +154,7 @@ impl Sink<ServerMessage> for Client {
             Err(async_channel::TrySendError::Full(_)) => unreachable!(),
         }
     }
+
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context,
@@ -160,6 +164,7 @@ impl Sink<ServerMessage> for Client {
         }
         std::task::Poll::Ready(Ok(()))
     }
+
     fn poll_close(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context,
@@ -180,11 +185,7 @@ async fn client_task_inner(
     let Some(msg) = client.next().await else {
         return Ok(());
     };
-    let ClientMessage::CreateStream {
-        cookie,
-        rectangles,
-        embed_cursor,
-    } = msg?;
+    let ClientMessage::CreateStream { cookie, rectangles, embed_cursor } = msg?;
     tracing::info!("CreateStream: {:?}", cookie);
     if cookie != *our_cookie {
         return Err(anyhow::anyhow!("Invalid cookie {}", our_cookie));
@@ -217,16 +218,10 @@ async fn client_task_inner(
     tracing::info!("CreateStream reply: {:?}", node_ids);
     match node_ids {
         Ok(node_ids) => {
-            client
-                .send(ServerMessage::StreamCreated { node_ids })
-                .await?;
+            client.send(ServerMessage::StreamCreated { node_ids }).await?;
         }
         Err(e) => {
-            client
-                .send(ServerMessage::StreamCreationError {
-                    error: format!("{:?}", e),
-                })
-                .await?;
+            client.send(ServerMessage::StreamCreationError { error: format!("{:?}", e) }).await?;
         }
     }
     tracing::info!("Client task exited");
@@ -262,10 +257,7 @@ async fn run(
         Err(e) => {
             let mut buf = String::new();
             pidfile.read_to_string(&mut buf)?;
-            eprintln!(
-                "Another instance of picom-egl-screencast is running: {}, pid: {}",
-                e, buf
-            );
+            eprintln!("Another instance of picom-egl-screencast is running: {}, pid: {}", e, buf);
             return Ok(());
         }
     }
@@ -280,10 +272,8 @@ async fn run(
 
     {
         let (x11, _) = x11rb::rust_connection::RustConnection::connect(None)?;
-        let egl_screencast_socket_atom = x11
-            .intern_atom(false, b"EGL_SCREENCAST_SOCKET")?
-            .reply()?
-            .atom;
+        let egl_screencast_socket_atom =
+            x11.intern_atom(false, b"EGL_SCREENCAST_SOCKET")?.reply()?.atom;
         let utf8_string = x11.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
         let path_bytes = socket_path.to_str().unwrap().as_bytes();
         x11.change_property(

@@ -12,6 +12,7 @@ use std::{
 use anyhow::Context;
 use drm_fourcc::DrmModifier;
 use gbm::BufferObjectFlags;
+use gl_bindings::gl;
 use pipewire::{
     loop_::IoSource,
     properties::properties,
@@ -31,8 +32,6 @@ use pipewire::{
     },
     stream::StreamFlags,
 };
-
-use gl_bindings::gl;
 use slotmap::{DefaultKey, SlotMap};
 use smallvec::smallvec;
 
@@ -135,11 +134,11 @@ fn blit(
 
 #[derive(Debug)]
 struct ParamFormat<'a> {
-    format: Option<spa::param::video::VideoFormat>,
+    format:    Option<spa::param::video::VideoFormat>,
     modifiers: Cow<'a, [DrmModifier]>,
-    width: u32,
-    height: u32,
-    fixate: bool,
+    width:     u32,
+    height:    u32,
+    fixate:    bool,
 }
 
 impl<'a> ParamFormat<'a> {
@@ -165,6 +164,7 @@ impl<'a> PodDeserialize<'a> for ParamFormat<'static> {
         impl<'de> spa::pod::deserialize::Visitor<'de> for Visitor {
             type ArrayElem = std::convert::Infallible;
             type Value = ParamFormat<'static>;
+
             fn visit_object(
                 &self,
                 object_deserializer: &mut spa::pod::deserialize::ObjectPodDeserializer<'de>,
@@ -175,11 +175,11 @@ impl<'a> PodDeserialize<'a> for ParamFormat<'static> {
                     utils::{Choice, ChoiceEnum, Id},
                 };
                 let mut ret = ParamFormat {
-                    format: None,
+                    format:    None,
                     modifiers: Cow::Borrowed(&[]),
-                    width: 0,
-                    height: 0,
-                    fixate: false,
+                    width:     0,
+                    height:    0,
+                    fixate:    false,
                 };
                 let modifiers = ret.modifiers.to_mut();
                 while let Some((prop, id, flags)) =
@@ -187,23 +187,27 @@ impl<'a> PodDeserialize<'a> for ParamFormat<'static> {
                 {
                     let id = FormatProperties::from_raw(id);
                     match id {
-                        FormatProperties::VideoSize => match prop {
-                            Value::Rectangle(rect) => {
-                                ret.width = rect.width;
-                                ret.height = rect.height;
+                        FormatProperties::VideoSize => {
+                            match prop {
+                                Value::Rectangle(rect) => {
+                                    ret.width = rect.width;
+                                    ret.height = rect.height;
+                                }
+                                Value::Choice(ChoiceValue::Rectangle(Choice(
+                                    _flags,
+                                    ChoiceEnum::None(rect),
+                                ))) => {
+                                    ret.width = rect.width;
+                                    ret.height = rect.height;
+                                }
+                                _ => {
+                                    tracing::debug!("Invalid type for VideoSize: {:?}", prop);
+                                    return Err(
+                                        spa::pod::deserialize::DeserializeError::InvalidType,
+                                    );
+                                }
                             }
-                            Value::Choice(ChoiceValue::Rectangle(Choice(
-                                _flags,
-                                ChoiceEnum::None(rect),
-                            ))) => {
-                                ret.width = rect.width;
-                                ret.height = rect.height;
-                            }
-                            _ => {
-                                tracing::debug!("Invalid type for VideoSize: {:?}", prop);
-                                return Err(spa::pod::deserialize::DeserializeError::InvalidType);
-                            }
-                        },
+                        }
                         FormatProperties::VideoModifier => {
                             ret.fixate = !flags.contains(PropertyFlags::DONT_FIXATE);
                             match prop {
@@ -212,10 +216,7 @@ impl<'a> PodDeserialize<'a> for ParamFormat<'static> {
                                 }
                                 Value::Choice(ChoiceValue::Long(Choice(_flags, choices))) => {
                                     match choices {
-                                        ChoiceEnum::Enum {
-                                            default,
-                                            alternatives,
-                                        } => {
+                                        ChoiceEnum::Enum { default, alternatives } => {
                                             modifiers.push(DrmModifier::from(default as u64));
                                             modifiers.extend(
                                                 alternatives
@@ -245,23 +246,27 @@ impl<'a> PodDeserialize<'a> for ParamFormat<'static> {
                                 }
                             }
                         }
-                        FormatProperties::VideoFormat => match prop {
-                            Value::Id(id) => {
-                                let format = spa::param::video::VideoFormat::from_raw(id.0);
-                                ret.format = Some(format);
+                        FormatProperties::VideoFormat => {
+                            match prop {
+                                Value::Id(id) => {
+                                    let format = spa::param::video::VideoFormat::from_raw(id.0);
+                                    ret.format = Some(format);
+                                }
+                                Value::Choice(ChoiceValue::Id(Choice(
+                                    _,
+                                    ChoiceEnum::None(Id(format)),
+                                ))) => {
+                                    let format = spa::param::video::VideoFormat::from_raw(format);
+                                    ret.format = Some(format);
+                                }
+                                _ => {
+                                    tracing::debug!("Invalid type for VideoFormat: {:?}", prop);
+                                    return Err(
+                                        spa::pod::deserialize::DeserializeError::InvalidType,
+                                    );
+                                }
                             }
-                            Value::Choice(ChoiceValue::Id(Choice(
-                                _,
-                                ChoiceEnum::None(Id(format)),
-                            ))) => {
-                                let format = spa::param::video::VideoFormat::from_raw(format);
-                                ret.format = Some(format);
-                            }
-                            _ => {
-                                tracing::debug!("Invalid type for VideoFormat: {:?}", prop);
-                                return Err(spa::pod::deserialize::DeserializeError::InvalidType);
-                            }
-                        },
+                        }
 
                         _ => {
                             tracing::debug!("Unknown property: {:?}", id);
@@ -308,21 +313,15 @@ impl<'a> PodSerialize for ParamFormat<'a> {
                 PropertyFlags::MANDATORY,
             )?;
         } else {
-            let mut modifiers: Vec<_> = self
-                .modifiers
-                .iter()
-                .map(|m| u64::from(*m) as i64)
-                .collect();
+            let mut modifiers: Vec<_> =
+                self.modifiers.iter().map(|m| u64::from(*m) as i64).collect();
             if !self.modifiers.contains(&DrmModifier::Invalid) && !self.fixate {
                 modifiers.push(u64::from(DrmModifier::Invalid) as _);
             }
-            let choice = Choice(
-                ChoiceFlags::empty(),
-                ChoiceEnum::Enum {
-                    default: u64::from(self.modifiers[0]) as _,
-                    alternatives: modifiers,
-                },
-            );
+            let choice = Choice(ChoiceFlags::empty(), ChoiceEnum::Enum {
+                default:      u64::from(self.modifiers[0]) as _,
+                alternatives: modifiers,
+            });
             let flags = if self.fixate {
                 PropertyFlags::MANDATORY | PropertyFlags::DONT_FIXATE
             } else {
@@ -332,10 +331,7 @@ impl<'a> PodSerialize for ParamFormat<'a> {
         }
         serializer.serialize_property(
             FormatProperties::VideoSize.0,
-            &Rectangle {
-                width: self.width,
-                height: self.height,
-            },
+            &Rectangle { width: self.width, height: self.height },
             PropertyFlags::empty(),
         )?;
         serializer.serialize_property(
@@ -348,10 +344,10 @@ impl<'a> PodSerialize for ParamFormat<'a> {
 }
 
 struct BufferInfo<'a> {
-    buffers: (u32, u32),
-    blocks: u32,
-    size: u32,
-    stride: u32,
+    buffers:   (u32, u32),
+    blocks:    u32,
+    size:      u32,
+    stride:    u32,
     data_type: &'a [spa::buffer::DataType],
 }
 
@@ -360,21 +356,20 @@ impl<'a> PodSerialize for BufferInfo<'a> {
         &self,
         serializer: PodSerializer<O>,
     ) -> Result<spa::pod::serialize::SerializeSuccess<O>, spa::pod::serialize::GenError> {
-        use spa::sys;
-        use spa::utils::{Choice, ChoiceEnum, ChoiceFlags};
+        use spa::{
+            sys,
+            utils::{Choice, ChoiceEnum, ChoiceFlags},
+        };
         let mut serializer =
             serializer.serialize_object(SpaTypes::ObjectParamBuffers.0, ParamType::Buffers.0)?;
         if self.buffers.0 != self.buffers.1 {
             serializer.serialize_property(
                 sys::SPA_PARAM_BUFFERS_buffers,
-                &Choice::<i32>(
-                    ChoiceFlags::empty(),
-                    ChoiceEnum::Range {
-                        default: self.buffers.1 as _,
-                        min: self.buffers.0 as _,
-                        max: self.buffers.1 as _,
-                    },
-                ),
+                &Choice::<i32>(ChoiceFlags::empty(), ChoiceEnum::Range {
+                    default: self.buffers.1 as _,
+                    min:     self.buffers.0 as _,
+                    max:     self.buffers.1 as _,
+                }),
                 PropertyFlags::empty(),
             )?;
         } else {
@@ -400,17 +395,10 @@ impl<'a> PodSerialize for BufferInfo<'a> {
             PropertyFlags::empty(),
         )?;
 
-        let data_type_choices = Choice::<i32>(
-            ChoiceFlags::empty(),
-            ChoiceEnum::Flags {
-                default: (1 << self.data_type[0].as_raw()) as _,
-                flags: self
-                    .data_type
-                    .iter()
-                    .map(|t| (1 << t.as_raw()) as _)
-                    .collect(),
-            },
-        );
+        let data_type_choices = Choice::<i32>(ChoiceFlags::empty(), ChoiceEnum::Flags {
+            default: (1 << self.data_type[0].as_raw()) as _,
+            flags:   self.data_type.iter().map(|t| (1 << t.as_raw()) as _).collect(),
+        });
         serializer.serialize_property(
             sys::SPA_PARAM_BUFFERS_dataType,
             &data_type_choices,
@@ -439,21 +427,18 @@ struct StreamData {
 
     reply: Option<oneshot::Sender<Result<u32, anyhow::Error>>>,
 }
+
+struct StreamHandle {
+    stream:   pipewire::stream::Stream,
+    listener: Option<pipewire::stream::StreamListener<StreamData>>,
+}
 struct Pipewire {
     mainloop: pipewire::main_loop::MainLoop,
     formats_modifiers: Vec<(spa::param::video::VideoFormat, Vec<DrmModifier>)>,
     core: pipewire::core::Core,
     gbm: gbm::Device<DrmRenderNode>,
 
-    streams: RefCell<
-        SlotMap<
-            DefaultKey,
-            (
-                pipewire::stream::Stream,
-                Option<pipewire::stream::StreamListener<StreamData>>,
-            ),
-        >,
-    >,
+    streams: RefCell<SlotMap<DefaultKey, StreamHandle>>,
 
     /// SAFETY: This `IoSource` cannot outlive `self.mainloop`
     fence_waits: RefCell<HashMap<DefaultKey, *mut IoSource<'static, OwnedFd>>>,
@@ -469,7 +454,15 @@ fn stream_set_error(stream: &pipewire::stream::StreamRef, err: impl std::fmt::De
     tx.send(Outgoing::WakeMeUp).unwrap();
 }
 impl Pipewire {
-    fn new_stream(&self, width: u32, height: u32) -> anyhow::Result<pipewire::stream::Stream> {
+    fn new_stream(
+        self: &Rc<Self>,
+        width: u32,
+        height: u32,
+        x: i32,
+        y: i32,
+        embed_cursor: bool,
+        reply: oneshot::Sender<Result<u32, anyhow::Error>>,
+    ) -> anyhow::Result<()> {
         let stream_props = properties! {
             "media.class" => "Video/Source",
             "media.name" => "Screen",
@@ -482,16 +475,13 @@ impl Pipewire {
             .iter()
             .map(|(format, modifiers)| {
                 let mut buf = Vec::new();
-                PodSerializer::serialize(
-                    std::io::Cursor::new(&mut buf),
-                    &ParamFormat {
-                        format: Some(*format),
-                        modifiers: modifiers.into(),
-                        width,
-                        height,
-                        fixate: false,
-                    },
-                )?;
+                PodSerializer::serialize(std::io::Cursor::new(&mut buf), &ParamFormat {
+                    format: Some(*format),
+                    modifiers: modifiers.into(),
+                    width,
+                    height,
+                    fixate: false,
+                })?;
                 Ok(buf)
             })
             .collect::<Result<_, anyhow::Error>>()?;
@@ -502,7 +492,85 @@ impl Pipewire {
             StreamFlags::DRIVER | StreamFlags::ALLOC_BUFFERS,
             &mut pods,
         )?;
-        Ok(stream)
+        let data = StreamData {
+            outstanding_buffer: Cell::new(None),
+            this: self.clone(),
+            x,
+            y,
+            width,
+            height,
+            fixated_format: RefCell::new(None),
+            buffers: Default::default(),
+            test_buffer: RefCell::new(None),
+            reply: Some(reply),
+        };
+        let stream_id = self.streams.borrow_mut().insert(StreamHandle { stream, listener: None });
+        let listener = self.streams.borrow()[stream_id]
+            .stream
+            .add_local_listener_with_user_data(data)
+            .add_buffer(move |stream, data, buf| {
+                data.this
+                    .handle_add_buffer(
+                        &data.fixated_format.borrow(),
+                        &mut data.test_buffer.borrow_mut(),
+                        &mut data.buffers.borrow_mut(),
+                        unsafe { &mut *buf },
+                        stream_id,
+                        x,
+                        y,
+                        embed_cursor,
+                    )
+                    .unwrap_or_else(|e| stream_set_error(stream, e, &data.this.tx))
+            })
+            .process(move |stream, data| {
+                let buffer = data.outstanding_buffer.take();
+                tracing::trace!("Process {buffer:?}");
+                if let Some(buffer) = buffer {
+                    unsafe { stream.queue_raw_buffer(buffer) };
+                }
+                data.this.send_buffer(stream, data)
+            })
+            .state_changed(move |stream, data, old_state, state| {
+                tracing::info!("State changed: {:?} -> {:?}", old_state, state);
+                if state == pipewire::stream::StreamState::Paused {
+                    if let Some(reply) = data.reply.take() {
+                        reply.send(Ok(stream.node_id())).unwrap()
+                    }
+                } else if state == pipewire::stream::StreamState::Streaming {
+                    data.this.send_buffer(stream, data)
+                }
+            })
+            .param_changed(
+                |stream, StreamData { this, fixated_format, test_buffer, .. }, id, pod| {
+                    this.handle_param_changed(
+                        &mut fixated_format.borrow_mut(),
+                        &mut test_buffer.borrow_mut(),
+                        stream,
+                        id,
+                        pod,
+                    )
+                    .unwrap_or_else(|e| stream_set_error(stream, e, &this.tx))
+                },
+            )
+            .remove_buffer(|_, StreamData { this, .. }, buf| {
+                let buf = unsafe { &mut *buf };
+                let id = *unsafe { Box::from_raw(buf.user_data as *mut DefaultKey) };
+                tracing::info!("Remove buffer: {id:?}");
+                let inner_buf = unsafe { &mut *buf.buffer };
+                let datas = unsafe {
+                    std::slice::from_raw_parts_mut(inner_buf.datas, inner_buf.n_datas as usize)
+                };
+                for data in datas {
+                    unsafe {
+                        OwnedFd::from_raw_fd(data.fd as _);
+                        data.fd = -1;
+                    }
+                }
+                this.tx.send(Outgoing::RemoveBuffers { ids: smallvec![id] }).unwrap();
+            })
+            .register()?;
+        self.streams.borrow_mut()[stream_id].listener = Some(listener);
+        Ok(())
     }
 
     fn handle_param_changed(
@@ -539,11 +607,11 @@ impl Pipewire {
         } else if !params.fixate {
             // Announcing fixated format
             let fixated_params = ParamFormat {
-                format: params.format,
+                format:    params.format,
                 modifiers: Cow::Owned(vec![params.modifiers[0]]),
-                width: params.width,
-                height: params.height,
-                fixate: true,
+                width:     params.width,
+                height:    params.height,
+                fixate:    true,
             };
             let mut buf = Vec::new();
             PodSerializer::serialize(std::io::Cursor::new(&mut buf), &fixated_params)?;
@@ -553,19 +621,16 @@ impl Pipewire {
         } else {
             // Now we have format, try to test allocate a buffer
             tracing::debug!("Test allocation");
-            let test_buffer = out_test_buffer.insert(
-                self.gbm.create_buffer_object_with_modifiers2(
+            let test_buffer =
+                out_test_buffer.insert(self.gbm.create_buffer_object_with_modifiers2(
                     params.width,
                     params.height,
                     spa_format_to_fourcc(
-                        params
-                            .format
-                            .with_context(|| anyhow::anyhow!("Format missing"))?,
+                        params.format.with_context(|| anyhow::anyhow!("Format missing"))?,
                     ),
                     [params.modifiers[0]].into_iter(),
                     BufferObjectFlags::RENDERING,
-                )?,
-            );
+                )?);
             let stride = test_buffer.stride()?;
             let size = stride * test_buffer.height()?;
             let buffer_info = BufferInfo {
@@ -597,9 +662,7 @@ impl Pipewire {
         embed_cursor: bool,
     ) -> anyhow::Result<()> {
         let Some(format) = format else {
-            return Err(anyhow::anyhow!(
-                "add_buffer called without a negotiated format"
-            ));
+            return Err(anyhow::anyhow!("add_buffer called without a negotiated format"));
         };
         tracing::debug!("Add buffer: {format:?}");
         let inner_buf = unsafe { &mut *buf.buffer };
@@ -617,14 +680,7 @@ impl Pipewire {
         assert!(inner_buf.n_datas == dma_buf.plane_count()?);
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(Outgoing::AddBuffer {
-                dma_buf,
-                stream_id,
-                x,
-                y,
-                embed_cursor,
-                reply: tx,
-            })
+            .send(Outgoing::AddBuffer { dma_buf, stream_id, x, y, embed_cursor, reply: tx })
             .unwrap();
         let Ok((id, dma_buf)) = rx.recv() else {
             panic!("picom failed to add buffer");
@@ -649,6 +705,7 @@ impl Pipewire {
         buffers.insert(id, dma_buf);
         Ok(())
     }
+
     fn send_buffer(&self, stream: &pipewire::stream::StreamRef, data: &StreamData) {
         if !matches!(stream.state(), pipewire::stream::StreamState::Streaming)
             || data.outstanding_buffer.get().is_some()
@@ -665,113 +722,11 @@ impl Pipewire {
 
     fn handle_message(self: &Rc<Self>, msg: Incoming) -> anyhow::Result<()> {
         match msg {
-            Incoming::CreateStream {
-                x,
-                y,
-                width,
-                height,
-                reply,
-                embed_cursor,
-            } => {
+            Incoming::CreateStream { x, y, width, height, reply, embed_cursor } => {
                 tracing::debug!("Creating stream with size {}x{}", width, height);
-                let stream = self.new_stream(width, height)?;
-                let data = StreamData {
-                    outstanding_buffer: Cell::new(None),
-                    this: self.clone(),
-                    x,
-                    y,
-                    width,
-                    height,
-                    fixated_format: RefCell::new(None),
-                    buffers: Default::default(),
-                    test_buffer: RefCell::new(None),
-                    reply: Some(reply),
-                };
-                let stream_id = self.streams.borrow_mut().insert((stream, None));
-                let listener = self.streams.borrow()[stream_id]
-                    .0
-                    .add_local_listener_with_user_data(data)
-                    .add_buffer(move |stream, data, buf| {
-                        data.this
-                            .handle_add_buffer(
-                                &data.fixated_format.borrow(),
-                                &mut data.test_buffer.borrow_mut(),
-                                &mut data.buffers.borrow_mut(),
-                                unsafe { &mut *buf },
-                                stream_id,
-                                x,
-                                y,
-                                embed_cursor,
-                            )
-                            .unwrap_or_else(|e| stream_set_error(stream, e, &data.this.tx))
-                    })
-                    .process(move |stream, data| {
-                        let buffer = data.outstanding_buffer.take();
-                        tracing::trace!("Process {buffer:?}");
-                        if let Some(buffer) = buffer {
-                            unsafe { stream.queue_raw_buffer(buffer) };
-                        }
-                        data.this.send_buffer(stream, data)
-                    })
-                    .state_changed(move |stream, data, old_state, state| {
-                        tracing::info!("State changed: {:?} -> {:?}", old_state, state);
-                        if state == pipewire::stream::StreamState::Paused {
-                            if let Some(reply) = data.reply.take() {
-                                reply.send(Ok(stream.node_id())).unwrap()
-                            }
-                        } else if state == pipewire::stream::StreamState::Streaming {
-                            data.this.send_buffer(stream, data)
-                        }
-                    })
-                    .param_changed(
-                        |stream,
-                         StreamData {
-                             this,
-                             fixated_format,
-                             test_buffer,
-                             ..
-                         },
-                         id,
-                         pod| {
-                            this.handle_param_changed(
-                                &mut fixated_format.borrow_mut(),
-                                &mut test_buffer.borrow_mut(),
-                                stream,
-                                id,
-                                pod,
-                            )
-                            .unwrap_or_else(|e| stream_set_error(stream, e, &this.tx))
-                        },
-                    )
-                    .remove_buffer(|_, StreamData { this, .. }, buf| {
-                        let buf = unsafe { &mut *buf };
-                        let id = *unsafe { Box::from_raw(buf.user_data as *mut DefaultKey) };
-                        tracing::info!("Remove buffer: {id:?}");
-                        let inner_buf = unsafe { &mut *buf.buffer };
-                        let datas = unsafe {
-                            std::slice::from_raw_parts_mut(
-                                inner_buf.datas,
-                                inner_buf.n_datas as usize,
-                            )
-                        };
-                        for data in datas {
-                            unsafe {
-                                OwnedFd::from_raw_fd(data.fd as _);
-                                data.fd = -1;
-                            }
-                        }
-                        this.tx
-                            .send(Outgoing::RemoveBuffers { ids: smallvec![id] })
-                            .unwrap();
-                    })
-                    .register()?;
-                self.streams.borrow_mut()[stream_id].1 = Some(listener);
+                self.new_stream(width, height, x, y, embed_cursor, reply)?;
             }
-            Incoming::NewFrame {
-                id,
-                fence,
-                stream_id,
-            } => {
+            Incoming::NewFrame { id, fence, stream_id } => {
                 tracing::trace!("New frame: {id:?} {fence:?} {stream_id:?}");
                 let fd = unsafe { OwnedFd::from_raw_fd(u32::from(fence) as _) };
                 if self.streams.borrow().get(stream_id).is_some() {
@@ -780,8 +735,8 @@ impl Pipewire {
                         tracing::trace!("Fence triggered: {id:?} {stream_id:?}");
                         let streams = this.streams.borrow();
                         if let Some(stream) = streams.get(stream_id) {
-                            stream.0.trigger_process().unwrap_or_else(|e| {
-                                stream_set_error(&streams[stream_id].0, e, &this.tx)
+                            stream.stream.trigger_process().unwrap_or_else(|e| {
+                                stream_set_error(&streams[stream_id].stream, e, &this.tx)
                             });
                         }
                         let _ = unsafe {
@@ -795,7 +750,7 @@ impl Pipewire {
             Incoming::BufferError { id, stream_id } => {
                 tracing::debug!("Buffer error: {id:?} {stream_id:?}");
                 let streams = self.streams.borrow();
-                stream_set_error(&streams[stream_id].0, "Buffer error", &self.tx);
+                stream_set_error(&streams[stream_id].stream, "Buffer error", &self.tx);
             }
             msg => tracing::warn!("Unhandled {msg:?}"),
         }
@@ -813,10 +768,7 @@ pub unsafe fn pipewire_main(
 ) -> anyhow::Result<()> {
     pipewire::init();
 
-    tracing::debug!(
-        "Starting pipewire thread, #formats {}",
-        formats_modifiers.len()
-    );
+    tracing::debug!("Starting pipewire thread, #formats {}", formats_modifiers.len());
     for (format, modifiers) in &formats_modifiers {
         tracing::debug!("  format: {format:?}");
         for modifier in modifiers {
@@ -850,14 +802,16 @@ pub unsafe fn pipewire_main(
             tracing::trace!("Woken");
             loop {
                 match pipewire.rx.try_recv() {
-                    Ok(msg) => match pipewire.handle_message(msg) {
-                        Ok(()) => {}
-                        Err(e) => {
-                            tracing::error!("Error handling message: {:?}", e);
-                            pipewire.mainloop.quit();
-                            return;
+                    Ok(msg) => {
+                        match pipewire.handle_message(msg) {
+                            Ok(()) => {}
+                            Err(e) => {
+                                tracing::error!("Error handling message: {:?}", e);
+                                pipewire.mainloop.quit();
+                                return;
+                            }
                         }
-                    },
+                    }
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                         pipewire.mainloop.quit();
@@ -865,8 +819,8 @@ pub unsafe fn pipewire_main(
                     }
                 }
             }
-            pipewire.streams.borrow_mut().retain(|_, (s, _)| {
-                if matches!(s.state(), pipewire::stream::StreamState::Error(_)) {
+            pipewire.streams.borrow_mut().retain(|_, StreamHandle { stream, .. }| {
+                if matches!(stream.state(), pipewire::stream::StreamState::Error(_)) {
                     tracing::info!("Removing errored stream");
                     false
                 } else {
