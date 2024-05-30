@@ -1,6 +1,9 @@
 use std::{
     io::{Read as _, Write as _},
-    os::unix::net::{UnixListener, UnixStream},
+    os::{
+        fd::AsRawFd as _,
+        unix::net::{UnixListener, UnixStream},
+    },
     path::{Path, PathBuf},
     pin::pin,
     sync::Arc,
@@ -61,14 +64,16 @@ impl Client {
                 }
             }
             let len = u32::from_be_bytes(len);
-            tracing::info!("Read message of length {}", len);
+            tracing::debug!("Read message of length {}", len);
             buf.resize(len as usize, 0u8);
             stream.read_exact(&mut buf).await?;
             let msg = serde_json::from_slice(&buf)?;
+            tracing::debug!("Received message: {:?}", msg);
             tx.send(Ok(msg)).await?;
         }
     }
 
+    #[tracing::instrument(skip(stream, tx))]
     async fn read_side(
         stream: ReadHalf<Async<UnixStream>>,
         tx: Sender<anyhow::Result<ClientMessage>>,
@@ -80,9 +85,10 @@ impl Client {
                 tx.send(Err(e)).await.ok();
             }
         }
-        tracing::info!("Client read side exited");
+        tracing::debug!("Client read side exited");
     }
 
+    #[tracing::instrument(skip(stream, rx))]
     async fn write_side(
         mut stream: WriteHalf<Async<UnixStream>>,
         rx: Receiver<ServerMessage>,
@@ -184,50 +190,68 @@ async fn client_task_inner(
     let mut client = client.fuse();
     tracing::info!("Client task started");
     let Some(msg) = client.next().await else {
+        tracing::warn!("Client disconnected before sending any message");
         return Ok(());
     };
-    let ClientMessage::CreateStream { cookie, rectangles, embed_cursor } = msg?;
-    tracing::info!("CreateStream: {:?}", cookie);
-    if cookie != *our_cookie {
-        return Err(anyhow::anyhow!("Invalid cookie {}", our_cookie));
-    }
-    let rxs = smol::unblock({
-        let pw_tx = pw_tx.clone();
-        move || {
-            let mut pw_tx = pw_tx.start_send();
-            let mut rxs = FuturesOrdered::new();
-            for r in rectangles {
-                let (tx, rx) = oneshot::channel();
-                pw_tx.send(crate::MessagesToPipewire::CreateStream {
-                    width: r.width,
-                    height: r.height,
-                    x: r.x,
-                    y: r.y,
-                    embed_cursor,
-                    reply: tx,
-                })?;
-                rxs.push_back(rx);
+    tracing::info!("Message: {:?}", msg);
+    match msg? {
+        ClientMessage::CloseStreams { node_ids } => {
+            tracing::info!("CloseStreams: {:?}", node_ids);
+            let pw_tx = pw_tx.clone();
+            smol::unblock(move || {
+                pw_tx.start_send().send(crate::MessagesToPipewire::CloseStreams { node_ids })
+            })
+            .await?;
+            tracing::info!("Request sent");
+        }
+        ClientMessage::CreateStream { cookie, rectangles, embed_cursor } => {
+            tracing::info!("CreateStream: {:?}", cookie);
+            if cookie != *our_cookie {
+                return Err(anyhow::anyhow!("Invalid cookie {}", our_cookie));
             }
-            Ok::<_, anyhow::Error>(rxs)
-        }
-    })
-    .await?;
+            let rxs = smol::unblock({
+                let pw_tx = pw_tx.clone();
+                move || {
+                    let mut pw_tx = pw_tx.start_send();
+                    let mut rxs = FuturesOrdered::new();
+                    for r in rectangles {
+                        let (tx, rx) = oneshot::channel();
+                        pw_tx.send(crate::MessagesToPipewire::CreateStream {
+                            width: r.width,
+                            height: r.height,
+                            x: r.x,
+                            y: r.y,
+                            embed_cursor,
+                            reply: tx,
+                        })?;
+                        rxs.push_back(rx);
+                    }
+                    Ok::<_, anyhow::Error>(rxs)
+                }
+            })
+            .await?;
 
-    let node_ids: SmallVec<[_; 6]> = rxs.collect().await;
-    let node_ids: SmallVec<[_; 6]> = node_ids.into_iter().collect::<Result<_, _>>()?;
-    let node_ids: Result<SmallVec<[_; 6]>, _> = node_ids.into_iter().collect();
-    tracing::info!("CreateStream reply: {:?}", node_ids);
-    match node_ids {
-        Ok(node_ids) => {
-            client.send(ServerMessage::StreamCreated { node_ids }).await?;
-        }
-        Err(e) => {
-            client.send(ServerMessage::StreamCreationError { error: format!("{:?}", e) }).await?;
+            let node_ids: SmallVec<[_; 6]> = rxs.collect().await;
+            let node_ids: SmallVec<[_; 6]> = node_ids.into_iter().collect::<Result<_, _>>()?;
+            let node_ids: Result<SmallVec<[_; 6]>, _> = node_ids.into_iter().collect();
+            tracing::info!("CreateStream reply: {:?}", node_ids);
+            match node_ids {
+                Ok(node_ids) => {
+                    client.send(ServerMessage::StreamCreated { node_ids }).await?;
+                }
+                Err(e) => {
+                    client
+                        .send(ServerMessage::StreamCreationError { error: format!("{:?}", e) })
+                        .await?;
+                }
+            }
         }
     }
     tracing::info!("Client task exited");
     Ok(())
 }
+
+#[tracing::instrument(skip(our_cookie, stream, pw_tx), fields(stream = stream.get_ref().as_raw_fd()))]
 async fn client_task(
     our_cookie: Arc<String>,
     stream: Async<UnixStream>,
@@ -235,7 +259,7 @@ async fn client_task(
 ) {
     match client_task_inner(our_cookie, stream, &pw_tx).await {
         Ok(_) => (),
-        Err(e) => println!("Error: {:?}", e),
+        Err(e) => tracing::error!("Error: {:?}", e),
     }
 }
 

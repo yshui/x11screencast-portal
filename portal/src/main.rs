@@ -10,6 +10,7 @@ use async_io::Async;
 use futures_util::{
     stream::FuturesOrdered, AsyncRead as _, AsyncWrite, Sink, SinkExt, Stream, StreamExt as _,
 };
+use itertools::izip;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use x11rb_async::{
@@ -208,6 +209,7 @@ struct Session {
     allow_multiple: bool,
     cursor_mode:    CursorMode,
     persist:        bool,
+    node_ids:       SmallVec<[u32; 6]>,
     restore_data:   Option<RestoreDataInner>,
 }
 
@@ -224,6 +226,17 @@ impl Session {
         #[zbus(object_server)] server: &zbus::ObjectServer,
         #[zbus(signal_context)] signal_ctx: zbus::SignalContext<'_>,
     ) -> zbus::fdo::Result<()> {
+        tracing::debug!("Session::Close called");
+        let (x11, screen, fut) = x11rb_async::rust_connection::RustConnection::connect(None)
+            .await
+            .fdo_context("Failed to connect to X11")?;
+        let _task = smol::spawn(fut);
+        let mut picom = Picom::new(&x11, screen).await.fdo_context("Failed to connect to picom")?;
+        picom
+            .send(protocol::ClientMessage::CloseStreams { node_ids: self.node_ids.clone() })
+            .await
+            .fdo_context("Failed to close streams")?;
+        picom.flush().await.fdo_context("Failed to flush")?;
         Self::closed(signal_ctx).await?;
         server.remove::<Self, _>(&self.path).await.unwrap();
         Ok(())
@@ -291,13 +304,18 @@ impl Type for CursorMode {
     fn signature() -> zvariant::Signature<'static> { u32::signature() }
 }
 
-struct FdoError<'a, T>(&'a str, T);
-impl<'a, T> FdoError<'a, T> {
-    fn with_msg(msg: &'a str) -> impl FnOnce(T) -> Self { move |e| Self(msg, e) }
+trait FdoContext<T, E> {
+    fn fdo_context(self, msg: &str) -> zbus::fdo::Result<T>;
+    fn with_fdo_context(self, f: impl FnOnce(E) -> String) -> zbus::fdo::Result<T>;
 }
-impl<'a, T: std::fmt::Debug> From<FdoError<'a, T>> for zbus::fdo::Error {
-    fn from(FdoError(msg, e): FdoError<T>) -> Self {
-        zbus::fdo::Error::Failed(format!("{msg}: {e:?}"))
+
+impl<T, E: std::fmt::Debug> FdoContext<T, E> for Result<T, E> {
+    fn with_fdo_context(self, f: impl FnOnce(E) -> String) -> zbus::fdo::Result<T> {
+        self.map_err(|e| zbus::fdo::Error::Failed(f(e)))
+    }
+
+    fn fdo_context(self, msg: &str) -> zbus::fdo::Result<T> {
+        self.with_fdo_context(|e| format!("{msg}: {e:?}"))
     }
 }
 
@@ -370,8 +388,10 @@ impl ScreenCast {
                 cursor_mode:    CursorMode::Hidden,
                 persist:        false,
                 restore_data:   None,
+                node_ids:       Default::default(),
             })
             .await?;
+        tracing::info!("create_session: {session_handle}");
         Ok((0, Default::default()))
     }
 
@@ -428,13 +448,13 @@ impl ScreenCast {
         let session = server.interface::<_, Session>(session_handle).await?;
         let (x11, screen, fut) = x11rb_async::rust_connection::RustConnection::connect(None)
             .await
-            .map_err(FdoError::with_msg("Failed to connect to X11"))?;
+            .fdo_context("Failed to connect to X11")?;
         let _task = smol::spawn(fut);
         let mut picom =
             Picom::new(&x11, screen).await.map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         let root = x11.setup().roots[screen].root;
         let cookie = picom.cookie.clone();
-        let session = session.get_mut().await;
+        let mut session = session.get_mut().await;
         let source_type = if !session.allow_multiple {
             session.source_type.iter().next().unwrap_or(SourceType::Monitor)
         } else {
@@ -447,10 +467,10 @@ impl ScreenCast {
             let monitors = x11
                 .randr_get_monitors(root, true)
                 .await
-                .map_err(FdoError::with_msg("Failed to get monitors"))?
+                .fdo_context("Failed to get monitors")?
                 .reply()
                 .await
-                .map_err(FdoError::with_msg("Failed to get monitors"))?;
+                .fdo_context("Failed to get monitors")?;
             let monitor_count = monitors.monitors.len();
             let monitor_names: FuturesOrdered<_> = monitors
                 .monitors
@@ -465,7 +485,7 @@ impl ScreenCast {
             let monitor_names: SmallVec<[_; 8]> = monitor_names
                 .into_iter()
                 .collect::<Result<_, _>>()
-                .map_err(FdoError::with_msg("get monitor names"))?;
+                .fdo_context("get monitor names")?;
             let mut m = monitors.monitors.iter().map(|m| {
                 protocol::Rectangle {
                     x:      m.x as i32,
@@ -515,10 +535,10 @@ impl ScreenCast {
             let geom = x11
                 .get_geometry(root)
                 .await
-                .map_err(FdoError::with_msg("root geometry"))?
+                .fdo_context("get root geometry send")?
                 .reply()
                 .await
-                .map_err(FdoError::with_msg("root geometry"))?;
+                .fdo_context("get root geometry reply")?;
             rectangles.push(protocol::Rectangle {
                 x:      0,
                 y:      0,
@@ -546,13 +566,9 @@ impl ScreenCast {
                 return Err(zbus::fdo::Error::Failed(error))
             }
         };
-        // We pretend the virtual source is a monitor source
-        let streams = node_ids
-            .into_iter()
-            .zip(types)
-            .zip(rectangles)
-            .zip(output_monitor_names.iter())
-            .map(|(((node_id, type_), rectangle), name)| {
+        session.node_ids.extend(node_ids.iter().copied());
+        let streams = izip!(node_ids, types, rectangles, &output_monitor_names)
+            .map(|(node_id, type_, rectangle, name)| {
                 (node_id, StreamDict {
                     position:    (rectangle.x, rectangle.y),
                     size:        (rectangle.width as i32, rectangle.height as i32),

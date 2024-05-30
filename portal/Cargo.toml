@@ -23,6 +23,7 @@ serde.workspace = true
 smallvec.workspace = true
 bitflags = { version = "2.5.0", features = [ "serde" ] }
 x11rb-async = { version = "0.13.0", features = [ "randr" ] }
+itertools.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true

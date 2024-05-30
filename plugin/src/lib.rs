@@ -597,7 +597,10 @@ enum MessagesToPipewire {
     },
     /// Error occurred for the given buffer. The pipewire thread should drop
     /// this buffer, and the stream it's associated with.
-    BufferError { id: DefaultKey, stream_id: DefaultKey },
+    BufferError {
+        id:        DefaultKey,
+        stream_id: DefaultKey,
+    },
     CreateStream {
         x: i32,
         y: i32,
@@ -605,6 +608,9 @@ enum MessagesToPipewire {
         height: u32,
         embed_cursor: bool,
         reply: oneshot::Sender<anyhow::Result<u32>>,
+    },
+    CloseStreams {
+        node_ids: SmallVec<[u32; 6]>,
     },
 }
 

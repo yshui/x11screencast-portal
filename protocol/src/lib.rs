@@ -21,6 +21,7 @@ pub enum ClientMessage {
         rectangles:   SmallVec<[Rectangle; 6]>,
         embed_cursor: bool,
     },
+    CloseStreams { node_ids: SmallVec<[u32; 6]> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

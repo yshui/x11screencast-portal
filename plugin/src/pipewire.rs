@@ -438,7 +438,8 @@ struct Pipewire {
     core: pipewire::core::Core,
     gbm: gbm::Device<DrmRenderNode>,
 
-    streams: RefCell<SlotMap<DefaultKey, StreamHandle>>,
+    streams:           RefCell<SlotMap<DefaultKey, StreamHandle>>,
+    node_id_to_stream: RefCell<HashMap<u32, DefaultKey>>,
 
     /// SAFETY: This `IoSource` cannot outlive `self.mainloop`
     fence_waits: RefCell<HashMap<DefaultKey, *mut IoSource<'static, OwnedFd>>>,
@@ -534,6 +535,8 @@ impl Pipewire {
                 tracing::info!("State changed: {:?} -> {:?}", old_state, state);
                 if state == pipewire::stream::StreamState::Paused {
                     if let Some(reply) = data.reply.take() {
+                        let mut node_id_to_stream = data.this.node_id_to_stream.borrow_mut();
+                        node_id_to_stream.insert(stream.node_id(), stream_id);
                         reply.send(Ok(stream.node_id())).unwrap()
                     }
                 } else if state == pipewire::stream::StreamState::Streaming {
@@ -752,7 +755,20 @@ impl Pipewire {
                 let streams = self.streams.borrow();
                 stream_set_error(&streams[stream_id].stream, "Buffer error", &self.tx);
             }
-            msg => tracing::warn!("Unhandled {msg:?}"),
+            Incoming::CloseStreams { node_ids } => {
+                tracing::debug!("Close streams: {node_ids:?}");
+                let streams = self.streams.borrow();
+                let node_id_to_stream = self.node_id_to_stream.borrow();
+                for id in node_ids {
+                    if let Some(stream_id) = node_id_to_stream.get(&id).copied() {
+                        stream_set_error(
+                            &streams[stream_id].stream,
+                            "Client requested close",
+                            &self.tx,
+                        );
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -797,6 +813,7 @@ pub unsafe fn pipewire_main(
             streams: Default::default(),
             tx,
             rx,
+            node_id_to_stream: Default::default(),
         });
         move |()| {
             tracing::trace!("Woken");
@@ -819,9 +836,12 @@ pub unsafe fn pipewire_main(
                     }
                 }
             }
+            let mut node_id_to_stream = pipewire.node_id_to_stream.borrow_mut();
             pipewire.streams.borrow_mut().retain(|_, StreamHandle { stream, .. }| {
                 if matches!(stream.state(), pipewire::stream::StreamState::Error(_)) {
                     tracing::info!("Removing errored stream");
+                    let key = node_id_to_stream.remove(&stream.node_id()).unwrap();
+                    tracing::info!("Removed stream: {key:?}");
                     false
                 } else {
                     true
