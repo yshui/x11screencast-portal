@@ -4,7 +4,7 @@
     flake-utils.url = "github:numtide/flake-utils";
     fenix = {
       inputs.nixpkgs.follows = "nixpkgs";
-      url = github:nix-community/fenix;
+      url = "github:nix-community/fenix";
     };
     rust-manifest = {
       flake = false;
