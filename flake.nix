@@ -21,9 +21,7 @@
         ]);
         rustPlatform = (pkgs.makeRustPlatform {
           cargo = rust-toolchain.cargo;
-          rustc = rust-toolchain.rustc // {
-            inherit (pkgs.rustc) targetPlatforms badTargetPlatforms;
-          };
+          rustc = rust-toolchain.rustc;
         });
 
         inherit (rustPlatform) buildRustPackage bindgenHook;
