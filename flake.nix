@@ -27,7 +27,7 @@
         inherit (rustPlatform) buildRustPackage bindgenHook;
 
         libraries = with pkgs;[
-          (enableDebugging mesa)
+          mesa
           libffi
           pixman
           xorg.libxcb
