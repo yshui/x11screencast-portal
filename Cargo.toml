@@ -1,6 +1,7 @@
 [workspace]
 members = ["portal", "gl-bindings", "plugin", "protocol"]
 resolver = "2"
+license = "MPL-2.0"
 
 [profile.release]
 codegen-units = 1
