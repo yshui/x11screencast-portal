@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "nixpkgs";
+    nixpkgs.url = "github:nixos/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
     fenix = {
       inputs.nixpkgs.follows = "nixpkgs";
@@ -8,7 +8,7 @@
     };
     rust-manifest = {
       flake = false;
-      url = "https://static.rust-lang.org/dist/2024-05-08/channel-rust-nightly.toml";
+      url = "https://static.rust-lang.org/dist/2025-03-18/channel-rust-nightly.toml";
     };
   };
 
@@ -28,6 +28,7 @@
 
         libraries = with pkgs;[
           mesa
+          libgbm
           libffi
           pixman
           xorg.libxcb
