@@ -1,27 +1,24 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    fenix = {
+    rustup = {
       inputs.nixpkgs.follows = "nixpkgs";
-      url = "github:nix-community/fenix";
+      url = "github:yshui/rustup.nix";
     };
     rust-manifest = {
       flake = false;
-      url = "https://static.rust-lang.org/dist/2025-03-18/channel-rust-nightly.toml";
+      url = "https://static.rust-lang.org/dist/2025-12-10/channel-rust-nightly.toml";
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, fenix, ... } @ inputs:
+  outputs = { self, nixpkgs, flake-utils, rustup, ... } @ inputs:
     let
       g = pkgs: let
-        rust-toolchain = pkgs.fenix.fromManifestFile inputs.rust-manifest;
-        rust = pkgs.fenix.combine (with rust-toolchain; [
-          rustc cargo rust-src rustfmt clippy
-        ]);
+        rust-toolchain = (pkgs.rustToolchainFromManifestFile inputs.rust-manifest).minimal;
         rustPlatform = (pkgs.makeRustPlatform {
-          cargo = rust-toolchain.cargo;
-          rustc = rust-toolchain.rustc;
+          cargo = rust-toolchain;
+          rustc = rust-toolchain;
         });
 
         inherit (rustPlatform) buildRustPackage bindgenHook;
@@ -43,7 +40,7 @@
       in {
         devShell = pkgs.mkShell {
           buildInputs = libraries;
-          nativeBuildInputs = [ rust ] ++ packages;
+          nativeBuildInputs = [ rust-toolchain ] ++ packages;
           LIBCLANG_PATH = pkgs.lib.makeLibraryPath [ pkgs.llvmPackages_latest.libclang.lib ];
 
           shellHook =
@@ -99,10 +96,10 @@ EOF
     in
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system}.extend fenix.overlays.default;
+        pkgs = nixpkgs.legacyPackages.${system}.extend rustup.overlays.default;
       in (g pkgs)) // {
       overlays.default = final: prev: {
-        xdg-desktop-portal-picom = (g (final.extend fenix.overlays.default)).packages.default;
+        xdg-desktop-portal-picom = (g (final.extend rustup.overlays.default)).packages.default;
       };
     };
 }
