@@ -1,7 +1,6 @@
 [workspace]
 members = ["portal", "gl-bindings", "plugin", "protocol"]
 resolver = "2"
-license = "MPL-2.0"
 
 [profile.release]
 codegen-units = 1
@@ -22,4 +21,4 @@ x11rb = { version = "0.13.0", features = ["allow-unsafe-code", "xfixes"] }
 pkg-config = "0.3.0"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.0", features = ["env-filter"] }
-itertools = "0.13.0"
+itertools = "0.14.0"

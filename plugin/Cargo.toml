@@ -2,18 +2,19 @@
 name = "picom-egl-screencast"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-ctor = "0.2.8"
+ctor = "0.6.3"
 drm = "0.12.0"
 drm-fourcc.workspace = true
 libc = "0.2.155"
 anyhow = "1.0.0"
 libffi = "3.2.0"
-gbm = { version = "0.15.0", default-features = false, features = [
+gbm = { version = "0.18.0", default-features = false, features = [
 	"drm",
 	"drm-support",
 ] }
@@ -22,7 +23,6 @@ serde.workspace = true
 serde_json.workspace = true
 futures-util.workspace = true
 async-io.workspace = true
-fs4 = "0.8.3"
 async-channel = "2.3.1"
 gl-bindings = { path = "../gl-bindings/" }
 withfd.workspace = true
@@ -31,7 +31,7 @@ protocol = { path = "../protocol" }
 smallvec.workspace = true
 slotmap = "1.0.0"
 pipewire = { version = "0.8.0", features = [ "v0_3_33", "v0_3_34" ] }
-bitfield = "0.15.0"
+bitfield = "0.19.4"
 tracing.workspace = true
 tracing-subscriber.workspace = true
 smol = "2.0.0"
@@ -43,6 +43,6 @@ random-string = "1.1.0"
 
 [build-dependencies]
 anyhow = "1.0.86"
-bindgen = "0.69.4"
+bindgen = "0.72.1"
 gl_generator = "0.14.0"
 pkg-config = "0.3.30"

@@ -18,7 +18,7 @@ use x11rb_async::{
     protocol::{randr::ConnectionExt, xproto::ConnectionExt as _},
 };
 use zbus::zvariant;
-use zvariant::{DeserializeDict, OwnedValue, SerializeDict, Type, Value};
+use zvariant::{DeserializeDict, OwnedValue, SerializeDict, Type};
 
 struct Picom {
     conn:   Async<UnixStream>,

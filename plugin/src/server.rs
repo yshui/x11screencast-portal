@@ -10,7 +10,6 @@ use std::{
 };
 
 use async_channel::{Receiver, Sender};
-use fs4::FileExt as _;
 use futures_util::{
     io::{ReadHalf, WriteHalf},
     stream::FuturesOrdered,
@@ -275,7 +274,7 @@ async fn run(
         .read(true)
         .write(true)
         .open(place_runtime_file(&format!("{}.pid", file_name)))?;
-    match pidfile.try_lock_exclusive() {
+    match pidfile.try_lock() {
         Ok(_) => {
             pidfile.write_all(format!("{}", std::process::id()).as_bytes())?;
         }

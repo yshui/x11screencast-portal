@@ -599,7 +599,7 @@ impl Pipewire {
         let (_, params): (_, ParamFormat<'_>) = PodDeserializer::deserialize_from(data.as_bytes())
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
         tracing::debug!("Format: {params:?}");
-        if params.modifiers.len() == 0 {
+        if params.modifiers.is_empty() {
             return Err(anyhow::anyhow!("Client doesn't support DMA-Buf"));
         }
 
@@ -634,11 +634,11 @@ impl Pipewire {
                     [params.modifiers[0]].into_iter(),
                     BufferObjectFlags::RENDERING,
                 )?);
-            let stride = test_buffer.stride()?;
-            let size = stride * test_buffer.height()?;
+            let stride = test_buffer.stride();
+            let size = stride * test_buffer.height();
             let buffer_info = BufferInfo {
                 buffers: (2, 3),
-                blocks: test_buffer.plane_count()?,
+                blocks: test_buffer.plane_count(),
                 size,
                 stride,
                 data_type: &[spa::buffer::DataType::DmaBuf],
@@ -680,7 +680,7 @@ impl Pipewire {
                 BufferObjectFlags::RENDERING,
             )?
         };
-        assert!(inner_buf.n_datas == dma_buf.plane_count()?);
+        assert!(inner_buf.n_datas == dma_buf.plane_count());
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(Outgoing::AddBuffer { dma_buf, stream_id, x, y, embed_cursor, reply: tx })
@@ -691,16 +691,16 @@ impl Pipewire {
         buf.user_data = Box::leak(Box::new(id)) as *mut _ as *mut _;
         let datas =
             unsafe { std::slice::from_raw_parts_mut(inner_buf.datas, inner_buf.n_datas as usize) };
-        let height = dma_buf.height()?;
+        let height = dma_buf.height();
         for (i, data) in datas.iter_mut().enumerate() {
-            let stride = dma_buf.stride_for_plane(i as _)?;
+            let stride = dma_buf.stride_for_plane(i as _);
             data.fd = dma_buf.fd_for_plane(i as _)?.into_raw_fd() as _;
             data.type_ = spa::sys::SPA_DATA_DmaBuf;
             data.data = std::ptr::null_mut();
             data.maxsize = stride * height;
             data.flags = spa::sys::SPA_DATA_FLAG_READWRITE;
             let chunk = unsafe { &mut *data.chunk };
-            chunk.offset = dma_buf.offset(i as _)?;
+            chunk.offset = dma_buf.offset(i as _);
             chunk.size = stride * height;
             chunk.stride = stride as _;
             chunk.flags = spa::sys::SPA_CHUNK_FLAG_NONE as _;

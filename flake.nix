@@ -40,7 +40,7 @@
       in {
         devShell = pkgs.mkShell {
           buildInputs = libraries;
-          nativeBuildInputs = [ rust-toolchain ] ++ packages;
+          nativeBuildInputs = [ (rust-toolchain.override { extensions = [ "clippy" ]; }) ] ++ packages;
           LIBCLANG_PATH = pkgs.lib.makeLibraryPath [ pkgs.llvmPackages_latest.libclang.lib ];
 
           shellHook =

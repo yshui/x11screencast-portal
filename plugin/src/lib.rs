@@ -562,7 +562,7 @@ unsafe fn egl_check_extensions(egl: &egl::sys::Egl, dpy: egl::EGLDisplay) -> any
 
 struct DrmRenderNode(std::fs::File);
 impl AsFd for DrmRenderNode {
-    fn as_fd(&self) -> std::os::unix::io::BorrowedFd { self.0.as_fd() }
+    fn as_fd(&self) -> std::os::unix::io::BorrowedFd<'_> { self.0.as_fd() }
 }
 impl drm::Device for DrmRenderNode {
 }
@@ -735,33 +735,33 @@ impl CaptureReceiver {
         y: i32,
         embed_cursor: bool,
     ) -> anyhow::Result<Self> {
-        let modifier = dma_buf.modifier()?;
+        let modifier = dma_buf.modifier();
         let raw_modifier: u64 = modifier.into();
-        let fds = (0..dma_buf.plane_count()?)
+        let fds = (0..dma_buf.plane_count())
             .map(|i| dma_buf.fd_for_plane(i as i32))
             .collect::<Result<Vec<_>, _>>()?;
-        let width = dma_buf.width()?;
-        let height = dma_buf.height()?;
+        let width = dma_buf.width();
+        let height = dma_buf.height();
         tracing::debug!("Importing: {}x{}", width, height);
         let image = EGL.with(|egl| {
             let egl = egl.get().unwrap();
             let mut attribs = vec![
                 egl::sys::LINUX_DRM_FOURCC_EXT as isize,
-                dma_buf.format()? as _,
+                dma_buf.format() as _,
                 egl::sys::WIDTH as _,
                 width as _,
                 egl::sys::HEIGHT as _,
                 height as _,
             ];
-            for plane_id in 0..(dma_buf.plane_count()? as i32) {
+            for plane_id in 0..(dma_buf.plane_count() as i32) {
                 let param_ids = &EGL_DMA_BUF_PARAMETER_IDS[plane_id as usize];
                 attribs.extend_from_slice(&[
                     param_ids.fd_ext as isize,
                     fds[plane_id as usize].as_raw_fd() as _,
                     param_ids.offset_ext as isize,
-                    dma_buf.offset(plane_id)? as _,
+                    dma_buf.offset(plane_id) as _,
                     param_ids.pitch_ext as isize,
-                    dma_buf.stride_for_plane(plane_id)? as _,
+                    dma_buf.stride_for_plane(plane_id) as _,
                     param_ids.modifier_lo_ext as isize,
                     (raw_modifier & 0xffffffff) as _,
                     param_ids.modifier_hi_ext as isize,
