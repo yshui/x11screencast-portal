@@ -1,3 +1,4 @@
+#![allow(unsafe_op_in_unsafe_fn)]
 use std::{
     cell::{OnceCell, UnsafeCell},
     collections::HashSet,
@@ -40,7 +41,7 @@ mod picom {
 }
 
 #[link(name = "EGL")]
-extern "C" {
+unsafe extern "C" {
     fn eglGetProcAddress(procname: *const std::os::raw::c_char) -> *const std::os::raw::c_void;
 }
 
@@ -318,6 +319,7 @@ impl PluginContext {
                     let image = CaptureReceiver::import(&dma_buf, stream_id, x, y, embed_cursor)
                         .context("import")?;
                     let id = self.buffers.insert(image);
+                    tracing::info!("Added buffer {id:?} for stream {stream_id:?} @ {x}x{y}");
                     reply.send((id, dma_buf)).ok();
                 }
                 MessagesFromPipewire::ActivateBuffer { id } => {

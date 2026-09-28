@@ -19,18 +19,18 @@ use pipewire::{
     spa::{
         self,
         param::{
-            format::{FormatProperties, MediaSubtype, MediaType},
             ParamType,
+            format::{FormatProperties, MediaSubtype, MediaType},
         },
         pod::{
+            Pod, PropertyFlags,
             deserialize::{PodDeserialize, PodDeserializer},
             serialize::{PodSerialize, PodSerializer},
-            Pod, PropertyFlags,
         },
         support::system::IoFlags,
         utils::{Direction, SpaTypes},
     },
-    stream::StreamFlags,
+    stream::{StreamFlags, StreamState},
 };
 use slotmap::{DefaultKey, SlotMap};
 use smallvec::smallvec;
@@ -513,6 +513,7 @@ impl Pipewire {
             .stream
             .add_local_listener_with_user_data(data)
             .add_buffer(move |stream, data, buf| {
+                tracing::info!("{stream_id:?}/{}: add buffer", stream.node_id());
                 data.this
                     .handle_add_buffer(
                         &data.fixated_format.borrow(),
@@ -535,14 +536,19 @@ impl Pipewire {
                 data.this.send_buffer(stream, data)
             })
             .state_changed(move |stream, data, old_state, state| {
-                tracing::info!("State changed: {:?} -> {:?}", old_state, state);
-                if state == pipewire::stream::StreamState::Paused {
+                tracing::info!(
+                    "{stream_id:?}/{}: state changed: {:?} -> {:?}",
+                    stream.node_id(),
+                    old_state,
+                    state
+                );
+                if state == StreamState::Paused {
                     if let Some(reply) = data.reply.take() {
                         let mut node_id_to_stream = data.this.node_id_to_stream.borrow_mut();
                         node_id_to_stream.insert(stream.node_id(), stream_id);
                         reply.send(Ok(stream.node_id())).unwrap()
                     }
-                } else if state == pipewire::stream::StreamState::Streaming {
+                } else if state == StreamState::Streaming {
                     data.this.send_buffer(stream, data)
                 }
             })
@@ -713,7 +719,7 @@ impl Pipewire {
     }
 
     fn send_buffer(&self, stream: &pipewire::stream::Stream, data: &StreamData) {
-        if !matches!(stream.state(), pipewire::stream::StreamState::Streaming)
+        if !matches!(stream.state(), StreamState::Streaming)
             || data.outstanding_buffer.get().is_some()
         {
             return;
@@ -735,7 +741,9 @@ impl Pipewire {
             Incoming::NewFrame { id, fence, stream_id } => {
                 tracing::trace!("New frame: {id:?} {fence:?} {stream_id:?}");
                 let fd = unsafe { OwnedFd::from_raw_fd(u32::from(fence) as _) };
-                if self.streams.borrow().get(stream_id).is_some() {
+                if let Some(stream) = self.streams.borrow().get(stream_id)
+                    && stream.stream.state() == StreamState::Streaming
+                {
                     let this = self.clone();
                     let io_source = self.mainloop.loop_().add_io(fd, IoFlags::IN, move |_| {
                         tracing::trace!("Fence triggered: {id:?} {stream_id:?}");
@@ -841,7 +849,7 @@ pub unsafe fn pipewire_main(
             }
             let mut node_id_to_stream = pipewire.node_id_to_stream.borrow_mut();
             pipewire.streams.borrow_mut().retain(|_, StreamHandle { stream, .. }| {
-                if matches!(stream.state(), pipewire::stream::StreamState::Error(_)) {
+                if matches!(stream.state(), StreamState::Error(_)) {
                     tracing::info!("Removing errored stream");
                     let key = node_id_to_stream.remove(&stream.node_id()).unwrap();
                     tracing::info!("Removed stream: {key:?}");
