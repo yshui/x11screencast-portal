@@ -202,9 +202,17 @@ impl CursorMonitor {
         });
         let (tx, rx) = std::sync::mpsc::channel();
         let (x11, screen) = x11rb::rust_connection::RustConnection::connect(None)?;
-        let ctx = unsafe { egl.CreateContext(dpy, std::ptr::null(), ctx, std::ptr::null()) };
+        tracing::info!("{:#x}", unsafe { egl.QueryAPI() });
+        let attrs = [
+            egl::sys::CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY,
+            egl::sys::LOSE_CONTEXT_ON_RESET,
+            egl::sys::NONE,
+        ];
+        let ctx = unsafe { egl.CreateContext(dpy, std::ptr::null(), ctx, attrs.as_ptr() as *const _) };
         if ctx == egl::sys::NO_CONTEXT {
-            return Err(anyhow::anyhow!("Failed to create context"));
+            return Err(anyhow::anyhow!("Failed to create context, {:#x}", unsafe {
+                egl.GetError()
+            }));
         }
         let monitor = CursorMonitorImpl {
             x11,

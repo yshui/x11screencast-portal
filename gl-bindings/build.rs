@@ -21,6 +21,7 @@ fn main() -> anyhow::Result<()> {
             "EGL_KHR_fence_sync",
             "EGL_EXT_image_dma_buf_import",
             "EGL_EXT_image_dma_buf_import_modifiers",
+            "EGL_EXT_create_context_robustness",
         ]);
 
         reg.write_bindings(StructGenerator, &mut file).unwrap();
