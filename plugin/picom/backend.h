@@ -9,11 +9,12 @@
 
 #include "types.h"
 
-#define PICOM_BACKEND_MAJOR (1UL)
+#define PICOM_BACKEND_MAJOR (2UL)
 #define PICOM_BACKEND_MINOR (0UL)
 #define PICOM_BACKEND_MAKE_VERSION(major, minor) ((major) * 1000 + (minor))
 
 typedef pixman_region32_t region_t;
+struct shader_specification;
 
 struct xvisual_info {
 	/// Bit depth of the red component
@@ -31,7 +32,7 @@ struct xvisual_info {
 };
 
 typedef struct session session_t;
-struct managed_win;
+struct win;
 
 struct ev_loop;
 struct backend_operations;
@@ -53,21 +54,30 @@ enum shader_attributes {
 	SHADER_ATTRIBUTE_ANIMATED = 1,
 };
 
+struct blur_args {
+	int noise_radius;
+	double noise_scale;
+};
+
 struct gaussian_blur_args {
+	struct blur_args base;
 	int size;
 	double deviation;
 };
 
 struct box_blur_args {
+	struct blur_args base;
 	int size;
 };
 
 struct kernel_blur_args {
+	struct blur_args base;
 	struct conv **kernels;
 	int kernel_count;
 };
 
 struct dual_kawase_blur_args {
+	struct blur_args base;
 	int size;
 	int strength;
 };
@@ -75,6 +85,10 @@ struct dual_kawase_blur_args {
 typedef struct image_handle {
 	// Intentionally left blank
 } *image_handle;
+
+typedef struct shader_handle {
+	// Intentionally left blank
+} *shader_handle;
 
 /// A mask for various backend operations.
 ///
@@ -92,7 +106,7 @@ struct backend_mask_image {
 	/// rounded.
 	double corner_radius;
 	/// Origin of the mask image, in the source image's coordinate.
-	ivec2 origin;
+	vec2 origin;
 	/// Whether the mask image should be inverted.
 	bool inverted;
 };
@@ -103,6 +117,8 @@ struct backend_blur_args {
 	/// The source mask for the blur operation, may be NULL. Only parts of the source
 	/// image covered by the mask should participate in the blur operation.
 	const struct backend_mask_image *source_mask;
+	/// The scaling factor of the source mask.
+	vec2 source_mask_scale;
 	/// Region of the target image that will be covered by the blur operation, in the
 	/// source image's coordinate.
 	const region_t *target_mask;
@@ -123,11 +139,13 @@ struct backend_blit_args {
 	/// mask should be modified. This is the target's coordinate system.
 	const region_t *target_mask;
 	/// Custom shader for this blit operation.
-	void *shader;
-	/// Opacity of the source image.
-	double opacity;
-	/// Dim level of the source image.
-	double dim;
+	shader_handle shader;
+	/// Tint. Multiply each color channel by a specific factor. i.e.
+	/// out.c = in.c * tint.c, where c = r, g, b, or a.
+	///
+	/// Note since the backends operate in pre-mult alpha mode, applying
+	/// a factor to alpha requires applying the same factor to other colors too.
+	struct color tint;
 	/// Brightness limit of the source image. Source image
 	/// will be normalized so that the maximum brightness is
 	/// this value.
@@ -170,48 +188,6 @@ enum backend_image_capability {
 	/// Image can be rendered to. This is required for target images of any operation.
 	/// All images except bound X pixmaps should have this capability.
 	BACKEND_IMAGE_CAP_DST = 1 << 1,
-};
-
-enum backend_command_op {
-	BACKEND_COMMAND_INVALID = -1,
-	BACKEND_COMMAND_BLIT,
-	BACKEND_COMMAND_BLUR,
-	BACKEND_COMMAND_COPY_AREA,
-};
-
-/// Symbolic references used as render command source images. The actual `image_handle`
-/// will later be filled in by the renderer using this symbolic reference.
-enum backend_command_source {
-	BACKEND_COMMAND_SOURCE_WINDOW,
-	BACKEND_COMMAND_SOURCE_SHADOW,
-	BACKEND_COMMAND_SOURCE_BACKGROUND,
-};
-
-// TODO(yshui) might need better names
-
-struct backend_command {
-	enum backend_command_op op;
-	ivec2 origin;
-	enum backend_command_source source;
-	union {
-		struct {
-			struct backend_blit_args blit;
-			/// Region of the screen that will be covered by this blit
-			/// operations, in screen coordinates.
-			region_t opaque_region;
-		};
-		struct {
-			image_handle source_image;
-			const region_t *region;
-		} copy_area;
-		struct backend_blur_args blur;
-	};
-	/// Source mask for the operation.
-	/// If the `source_mask` of the operation's argument points to this, a mask image
-	/// will be created for the operation for the renderer.
-	struct backend_mask_image source_mask;
-	/// Target mask for the operation.
-	region_t target_mask;
 };
 
 enum backend_quirk {
@@ -362,22 +338,36 @@ struct backend_operations {
 	/// Create a shader object from a shader source.
 	///
 	/// Optional
-	void *(*create_shader)(backend_t *backend_data, const char *source)
-	    __attribute__((nonnull(1, 2)));
+	void *(*create_shader)(backend_t *backend_data, const struct shader_specification *,
+	                       const char *source) __attribute__((nonnull(1, 2, 3)));
 
 	/// Free a shader object.
 	///
 	/// Required if create_shader is present.
-	void (*destroy_shader)(backend_t *backend_data, void *shader)
+	void (*destroy_shader)(backend_t *backend_data, shader_handle shader)
 	    __attribute__((nonnull(1, 2)));
 
 	/// Create a new, uninitialized image with the given format and size.
 	///
 	/// @param backend_data backend data
-	/// @param format       the format of the image
-	/// @param size         the size of the image
+	/// @param format       format of the image
+	/// @param size         size of the image
 	image_handle (*new_image)(struct backend_base *backend_data,
 	                          enum backend_image_format format, ivec2 size)
+	    __attribute__((nonnull(1)));
+
+	/// Create a new image with the given format and size, and initialize it with
+	/// data. Optional, only used if backend has quirk: BACKEND_QUIRK_SLOW_BLUR.
+	///
+	/// @param backend_data backend data
+	/// @param format       format of the image
+	/// @param size         size of the image
+	/// @param pixels       data. for BACKEND_IMAGE_FORMAT_MASK, each byte is a pixel;
+	///                     for BACKEND_IMAGE_FORMAT_PIXMAP, it's 4 bytes/pixel, each
+	///                     pixel is given in the RGBA order.
+	image_handle (*new_image_from_pixels)(struct backend_base *backend_data,
+	                                      enum backend_image_format format, ivec2 size,
+	                                      int stride, const uint8_t *pixels)
 	    __attribute__((nonnull(1)));
 
 	/// Bind a X pixmap to the backend's internal image data structure.
@@ -426,7 +416,7 @@ struct backend_operations {
 	/// Get the attributes of a shader.
 	///
 	/// Optional, Returns a bitmask of attributes, see `shader_attributes`.
-	uint64_t (*get_shader_attributes)(backend_t *backend_data, void *shader)
+	uint64_t (*get_shader_attributes)(backend_t *backend_data, shader_handle shader)
 	    __attribute__((nonnull(1, 2)));
 
 	/// Get the age of the buffer content we are currently rendering on top
@@ -452,7 +442,7 @@ struct backend_operations {
 	/// Create a blur context that can be used to call `blur` for images with a
 	/// specific format.
 	void *(*create_blur_context)(backend_t *base, enum blur_method,
-	                             enum backend_image_format format, void *args);
+	                             enum backend_image_format format, struct blur_args *args);
 	/// Destroy a blur context
 	void (*destroy_blur_context)(backend_t *base, void *ctx);
 	/// Get how many pixels outside of the blur area is needed for blur

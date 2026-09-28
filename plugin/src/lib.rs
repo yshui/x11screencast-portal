@@ -1154,7 +1154,7 @@ unsafe fn init() {
     let api = &*picom::picom_api_get_interfaces(0, 1, c"egl-screencast".as_ptr());
     (api.add_backend_plugin.unwrap())(
         c"egl".as_ptr(),
-        1,
+        2,
         0,
         Some(backend_plugin_init),
         std::ptr::null_mut(),

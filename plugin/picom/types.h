@@ -28,6 +28,19 @@ typedef enum {
 
 enum tristate { TRI_FALSE = -1, TRI_UNKNOWN = 0, TRI_TRUE = 1 };
 
+/// Return value if it's not TRI_UNKNOWN, otherwise return fallback.
+static inline enum tristate tri_or(enum tristate value, enum tristate fallback) {
+	return value ?: fallback;
+}
+
+static inline bool tri_or_bool(enum tristate value, bool fallback) {
+	return value == TRI_UNKNOWN ? fallback : value == TRI_TRUE;
+}
+
+static inline enum tristate tri_from_bool(bool value) {
+	return value ? TRI_TRUE : TRI_FALSE;
+}
+
 /// A structure representing margins around a rectangle.
 typedef struct {
 	int top;
@@ -39,6 +52,19 @@ typedef struct {
 struct color {
 	double red, green, blue, alpha;
 };
+
+static inline bool color_eq(struct color a, struct color b) {
+	return a.red == b.red && a.green == b.green && a.blue == b.blue && a.alpha == b.alpha;
+}
+
+static inline struct color color_mult_alpha(struct color a, double alpha) {
+	return (struct color){
+	    .red = a.red * alpha,
+	    .green = a.green * alpha,
+	    .blue = a.blue * alpha,
+	    .alpha = a.alpha * alpha,
+	};
+}
 
 typedef uint32_t opacity_t;
 
@@ -118,6 +144,10 @@ static inline vec2 vec2_add(vec2 a, vec2 b) {
 	};
 }
 
+static inline vec2 vec2_neg(vec2 a) {
+	return (vec2){.x = -a.x, .y = -a.y};
+}
+
 static inline vec2 vec2_ceil(vec2 a) {
 	return (vec2){
 	    .x = ceil(a.x),
@@ -140,6 +170,13 @@ static inline vec2 vec2_scale(vec2 a, vec2 scale) {
 	return (vec2){
 	    .x = a.x * scale.x,
 	    .y = a.y * scale.y,
+	};
+}
+
+static inline vec2 vec2_reciprocal(vec2 a) {
+	return (vec2){
+	    .x = 1.0 / a.x,
+	    .y = 1.0 / a.y,
 	};
 }
 
@@ -175,5 +212,4 @@ static inline ivec2 ivec2_scale_floor(ivec2 a, vec2 scale) {
 	return vec2_as(vec2_floor(scaled));
 }
 
-#define MARGIN_INIT                                                                      \
-	{ 0, 0, 0, 0 }
+#define MARGIN_INIT {0, 0, 0, 0}
