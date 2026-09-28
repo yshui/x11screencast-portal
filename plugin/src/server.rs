@@ -20,10 +20,7 @@ use smol::Async;
 use x11rb::protocol::xproto::{ConnectionExt as _, PropMode};
 
 fn place_runtime_file(name: &str) -> PathBuf {
-    if let Some(path) = xdg::BaseDirectories::with_prefix("picom")
-        .ok()
-        .and_then(|base| base.place_runtime_file(name).ok())
-    {
+    if let Some(path) = xdg::BaseDirectories::with_prefix("picom").place_runtime_file(name).ok() {
         return path;
     }
     let name = format!("picom-{}", name);
