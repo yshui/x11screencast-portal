@@ -420,6 +420,7 @@ struct StreamData {
     width: u32,
     height: u32,
     outstanding_buffer: Cell<Option<*mut pipewire::sys::pw_buffer>>,
+    outstanding_buffer_ready: Rc<Cell<bool>>,
     fixated_format: RefCell<Option<ParamFormat<'static>>>,
     buffers: RefCell<HashMap<DefaultKey, gbm::BufferObject<()>>>,
     /// Test allocation buffer
@@ -429,8 +430,9 @@ struct StreamData {
 }
 
 struct StreamHandle {
-    stream:   pipewire::stream::StreamRc,
+    stream: pipewire::stream::StreamRc,
     listener: Option<pipewire::stream::StreamListener<StreamData>>,
+    outstanding_buffer_ready: Rc<Cell<bool>>,
 }
 struct Pipewire {
     mainloop: pipewire::main_loop::MainLoopRc,
@@ -496,8 +498,10 @@ impl Pipewire {
             StreamFlags::DRIVER | StreamFlags::ALLOC_BUFFERS,
             &mut pods,
         )?;
+        let outstanding_buffer_ready = Rc::new(Cell::new(false));
         let data = StreamData {
             outstanding_buffer: Cell::new(None),
+            outstanding_buffer_ready: outstanding_buffer_ready.clone(),
             this: self.clone(),
             x,
             y,
@@ -508,7 +512,11 @@ impl Pipewire {
             test_buffer: RefCell::new(None),
             reply: Some(reply),
         };
-        let stream_id = self.streams.borrow_mut().insert(StreamHandle { stream, listener: None });
+        let stream_id = self.streams.borrow_mut().insert(StreamHandle {
+            stream,
+            listener: None,
+            outstanding_buffer_ready,
+        });
         let listener = self.streams.borrow()[stream_id]
             .stream
             .add_local_listener_with_user_data(data)
@@ -529,8 +537,10 @@ impl Pipewire {
             })
             .process(move |stream, data| {
                 let buffer = data.outstanding_buffer.take();
-                tracing::trace!("Process {buffer:?}");
+                data.outstanding_buffer_ready.set(false);
                 if let Some(buffer) = buffer {
+                    let id = unsafe { *((*buffer).user_data as *const DefaultKey) };
+                    tracing::trace!("{stream_id:?}/{}: Process buffer {id:?}", stream.node_id());
                     unsafe { stream.queue_raw_buffer(buffer) };
                 }
                 data.this.send_buffer(stream, data)
@@ -549,7 +559,15 @@ impl Pipewire {
                         reply.send(Ok(stream.node_id())).unwrap()
                     }
                 } else if state == StreamState::Streaming {
-                    data.this.send_buffer(stream, data)
+                    if data.outstanding_buffer_ready.get() {
+                        let buffer = data.outstanding_buffer.get().unwrap();
+                        let id = unsafe { *((*buffer).user_data as *const DefaultKey) };
+                        tracing::trace!("Reusing buffer {id:?}");
+                        data.outstanding_buffer_ready.set(false);
+                        data.this.tx.send(Outgoing::ActivateBuffer { id }).unwrap();
+                    } else {
+                        data.this.send_buffer(stream, data)
+                    }
                 }
             })
             .param_changed(
@@ -719,12 +737,15 @@ impl Pipewire {
         if !matches!(stream.state(), StreamState::Streaming)
             || data.outstanding_buffer.get().is_some()
         {
+            tracing::debug!("Already has buffer");
             return;
         }
         let Some(buffer) = (unsafe { stream.dequeue_raw_buffer().as_mut() }) else {
+            tracing::warn!("no more buffers?!");
             return;
         };
         let id = unsafe { *(buffer.user_data as *const DefaultKey) };
+        tracing::trace!("Sending buffer {id:?}");
         data.outstanding_buffer.set(Some(buffer));
         self.tx.send(Outgoing::ActivateBuffer { id }).unwrap();
     }
@@ -738,17 +759,18 @@ impl Pipewire {
             Incoming::NewFrame { id, fence, stream_id } => {
                 tracing::trace!("New frame: {id:?} {fence:?} {stream_id:?}");
                 let fd = unsafe { OwnedFd::from_raw_fd(u32::from(fence) as _) };
-                if let Some(stream) = self.streams.borrow().get(stream_id)
-                    && stream.stream.state() == StreamState::Streaming
-                {
+                if self.streams.borrow().get(stream_id).is_some() {
                     let this = self.clone();
                     let io_source = self.mainloop.loop_().add_io(fd, IoFlags::IN, move |_| {
                         tracing::trace!("Fence triggered: {id:?} {stream_id:?}");
                         let streams = this.streams.borrow();
                         if let Some(stream) = streams.get(stream_id) {
-                            stream.stream.trigger_process().unwrap_or_else(|e| {
-                                stream_set_error(&streams[stream_id].stream, e, &this.tx)
-                            });
+                            stream.outstanding_buffer_ready.set(true);
+                            if stream.stream.state() == StreamState::Streaming {
+                                stream.stream.trigger_process().unwrap_or_else(|e| {
+                                    stream_set_error(&streams[stream_id].stream, e, &this.tx)
+                                });
+                            }
                         }
                         let _ = unsafe {
                             Box::from_raw(this.fence_waits.borrow_mut().remove(&id).unwrap())

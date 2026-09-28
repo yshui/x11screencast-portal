@@ -8,8 +8,8 @@ use std::{
     },
     rc::Rc,
     sync::{
-        mpsc::{Receiver, Sender},
         Arc,
+        mpsc::{Receiver, Sender},
     },
 };
 
@@ -361,7 +361,7 @@ impl PluginContext {
                 for i in active_buffers {
                     let b = &self.buffers[i];
                     gl.BindFramebuffer(gl::DRAW_FRAMEBUFFER, b.fbo);
-                    tracing::trace!("fbo: {}, size: {}x{}", b.fbo, b.width, b.height);
+                    tracing::trace!("{i:?}: size: {}x{}, pos: {}x{}", b.width, b.height, b.x, b.y);
                     gl.BlitFramebuffer(
                         // src
                         b.x as _,
@@ -455,10 +455,10 @@ fn deinit_trampoline(
 ) {
     tracing::debug!("userdata refcount: {}", Rc::strong_count(unsafe { &*userdata }));
     let deinit = {
-        // This is extremely unsafe. Dropping `userdata.deinit` transitively drops
-        // `userdata`, which we still have a mut reference to (!). So we must
-        // keep it alive, until we have gotten rid of the mut reference to
-        // `userdata`.
+        // This is extremely unsafe. Dropping `userdata.deinit` transitively
+        // drops `userdata`, which we still have a mut reference to (!).
+        // So we must keep it alive, until we have gotten rid of the mut
+        // reference to `userdata`.
         let userdata = unsafe { &mut *(*userdata).get() };
         userdata.deinit(*backend);
         userdata.present.take();
@@ -466,8 +466,8 @@ fn deinit_trampoline(
         userdata.deinit.take()
     };
 
-    // Here we don't have mut reference to `userdata` anymore, only a raw ptr. So
-    // it's safe to drop `deinit`.
+    // Here we don't have mut reference to `userdata` anymore, only a raw ptr.
+    // So it's safe to drop `deinit`.
     drop(deinit);
 }
 
@@ -1000,11 +1000,7 @@ unsafe fn backend_plugin_init_inner(backend: &mut picom::backend_base) -> anyhow
                 })
                 .map(|(modifiers, _)| modifiers.into())
                 .collect();
-            if !modifiers.is_empty() {
-                Some((spa_format, modifiers))
-            } else {
-                None
-            }
+            if !modifiers.is_empty() { Some((spa_format, modifiers)) } else { None }
         })
         .collect();
     if formats_modifiers.is_empty() {
