@@ -598,10 +598,7 @@ impl Pipewire {
             return Ok(());
         }
         let Some(data) = data else {
-            if out_fixated_format.is_some() {
-                tracing::debug!("Stream completed successfully");
-                stream_set_error(stream, "Format removed, stopping.", &self.tx);
-            }
+            *out_fixated_format = None;
             return Ok(());
         };
         unsafe { spa::sys::spa_debug_format(1, std::ptr::null(), data.as_raw_ptr()) };
