@@ -82,11 +82,11 @@ struct dual_kawase_blur_args {
 	int strength;
 };
 
-typedef struct image_handle {
+typedef struct _image_handle {
 	// Intentionally left blank
 } *image_handle;
 
-typedef struct shader_handle {
+typedef struct _shader_handle {
 	// Intentionally left blank
 } *shader_handle;
 
