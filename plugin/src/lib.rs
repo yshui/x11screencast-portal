@@ -1143,7 +1143,7 @@ unsafe fn backend_plugin_init_inner(backend: &mut picom::backend_base) -> anyhow
 /// # Safety
 pub unsafe extern "C" fn backend_plugin_init(backend: *mut picom::backend_base, _: *mut c_void) {
     if let Err(e) = backend_plugin_init_inner(&mut *backend) {
-        tracing::debug!("backend_plugin_init failed: {e:?}");
+        tracing::error!("backend_plugin_init failed: {e:?}");
     }
 }
 
