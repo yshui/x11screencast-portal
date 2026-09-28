@@ -429,13 +429,13 @@ struct StreamData {
 }
 
 struct StreamHandle {
-    stream:   pipewire::stream::Stream,
+    stream:   pipewire::stream::StreamRc,
     listener: Option<pipewire::stream::StreamListener<StreamData>>,
 }
 struct Pipewire {
-    mainloop: pipewire::main_loop::MainLoop,
+    mainloop: pipewire::main_loop::MainLoopRc,
     formats_modifiers: Vec<(spa::param::video::VideoFormat, Vec<DrmModifier>)>,
-    core: pipewire::core::Core,
+    core: pipewire::core::CoreRc,
     gbm: gbm::Device<DrmRenderNode>,
 
     streams:           RefCell<SlotMap<DefaultKey, StreamHandle>>,
@@ -447,7 +447,7 @@ struct Pipewire {
     tx: Tx,
     rx: Rx,
 }
-fn stream_set_error(stream: &pipewire::stream::StreamRef, err: impl std::fmt::Debug, tx: &Tx) {
+fn stream_set_error(stream: &pipewire::stream::Stream, err: impl std::fmt::Debug, tx: &Tx) {
     let err = format!("Error: {:?}", err);
     tracing::debug!("Stream error: {}", err);
     let err = std::ffi::CString::new(err).unwrap();
@@ -469,8 +469,11 @@ impl Pipewire {
             "media.name" => "Screen",
             "node.name" => "picom-egl-screencast",
         };
-        let stream =
-            pipewire::stream::Stream::new(&self.core, "picom-egl-screencast", stream_props)?;
+        let stream = pipewire::stream::StreamRc::new(
+            self.core.clone(),
+            "picom-egl-screencast",
+            stream_props,
+        )?;
         let pods: Vec<_> = self
             .formats_modifiers
             .iter()
@@ -580,7 +583,7 @@ impl Pipewire {
         &self,
         out_fixated_format: &mut Option<ParamFormat<'static>>,
         out_test_buffer: &mut Option<gbm::BufferObject<()>>,
-        stream: &pipewire::stream::StreamRef,
+        stream: &pipewire::stream::Stream,
         prop: u32,
         data: Option<&Pod>,
     ) -> anyhow::Result<()> {
@@ -709,7 +712,7 @@ impl Pipewire {
         Ok(())
     }
 
-    fn send_buffer(&self, stream: &pipewire::stream::StreamRef, data: &StreamData) {
+    fn send_buffer(&self, stream: &pipewire::stream::Stream, data: &StreamData) {
         if !matches!(stream.state(), pipewire::stream::StreamState::Streaming)
             || data.outstanding_buffer.get().is_some()
         {
@@ -799,9 +802,9 @@ pub unsafe fn pipewire_main(
         }
     }
 
-    let mainloop = ::pipewire::main_loop::MainLoop::new(None)?;
-    let context = pipewire::context::Context::new(&mainloop)?;
-    let core = context.connect(None)?;
+    let mainloop = ::pipewire::main_loop::MainLoopRc::new(None)?;
+    let context = pipewire::context::ContextRc::new(&mainloop, None)?;
+    let core = context.connect_rc(None)?;
     let _attached = waker.attach(mainloop.as_ref(), {
         let mainloop = mainloop.clone();
         let pipewire = Rc::new(Pipewire {

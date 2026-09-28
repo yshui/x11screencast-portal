@@ -6,5 +6,4 @@ license = "MIT"
 
 [dependencies]
 serde.workspace = true
-drm-fourcc.workspace = true
 smallvec.workspace = true

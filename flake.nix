@@ -24,11 +24,11 @@
       g =
         pkgs:
         let
-          rust-toolchain = (pkgs.rustToolchainFromManifestFile inputs.rust-manifest).minimal;
+          rust-toolchain = pkgs.rustToolchainFromManifestFile inputs.rust-manifest;
           rustPlatform = (
             pkgs.makeRustPlatform {
-              cargo = rust-toolchain;
-              rustc = rust-toolchain;
+              cargo = rust-toolchain.minimal;
+              rustc = rust-toolchain.minimal;
             }
           );
 
@@ -52,10 +52,13 @@
         {
           devShell = pkgs.mkShell {
             buildInputs = libraries;
-            nativeBuildInputs = [ (rust-toolchain.override { extensions = [ "clippy" ]; }) ] ++ packages;
+            nativeBuildInputs = [
+              (rust-toolchain.minimal.override { extensions = [ "clippy" ]; })
+            ]
+            ++ packages;
             LIBCLANG_PATH = pkgs.lib.makeLibraryPath [ pkgs.llvmPackages_latest.libclang.lib ];
 
-            shellHook = '''';
+            shellHook = "";
           };
           packages.default = buildRustPackage {
             name = "xdg-desktop-portal-picom";

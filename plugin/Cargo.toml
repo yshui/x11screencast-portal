@@ -25,24 +25,21 @@ futures-util.workspace = true
 async-io.workspace = true
 async-channel = "2.3.1"
 gl-bindings = { path = "../gl-bindings/" }
-withfd.workspace = true
 xdg.workspace = true
 protocol = { path = "../protocol" }
 smallvec.workspace = true
 slotmap = "1.0.0"
-pipewire = { version = "0.8.0", features = [ "v0_3_33", "v0_3_34" ] }
+pipewire = { version = "0.10.0", features = [ "v0_3_33", "v0_3_34" ] }
 bitfield = "0.19.4"
 tracing.workspace = true
 tracing-subscriber.workspace = true
 smol = "2.0.0"
 bytemuck = "1.16.0"
 oneshot = "0.1.7"
-atomic = "0.6.0"
 pin-project = "1.1.0"
 random-string = "1.1.0"
 
 [build-dependencies]
 anyhow = "1.0.86"
 bindgen = "0.72.1"
-gl_generator = "0.14.0"
 pkg-config = "0.3.30"

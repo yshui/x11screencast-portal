@@ -8,9 +8,7 @@ lto = true
 
 [workspace.dependencies]
 anyhow = "1.0.0"
-withfd = { version = "0.3.1", features = ["async-io"] }
 xdg = "3.0.0"
-futures-executor = { version = "0.3.30", features = ["thread-pool"] }
 futures-util = "0.3.30"
 async-io = "2.3.2"
 serde = { version = "1.0.202", features = ["derive"] }
