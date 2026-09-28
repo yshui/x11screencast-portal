@@ -8,7 +8,7 @@
     };
     rust-manifest = {
       flake = false;
-      url = "https://static.rust-lang.org/dist/2025-12-10/channel-rust-nightly.toml";
+      url = "https://static.rust-lang.org/dist/2026-09-28/channel-rust-nightly.toml";
     };
   };
 
